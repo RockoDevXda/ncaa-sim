@@ -1,9 +1,7 @@
-YAML
-name: Nightly NCAA Monte Carlo Sim & Discord Alert
+name: Nightly NCAA Monte Carlo Sim
 
 on:
   schedule:
-    # 06:15 UTC = 12:15 AM CST
     - cron: '15 6 * * *'
   workflow_dispatch:
 
@@ -25,13 +23,13 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run daily simulation & post to Discord
+      - name: Run daily simulation and post to Discord
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
         run: python daily_runner.py
 
-      - name: Commit & push updated daily_slate.json
+      - name: Commit and push updated daily_slate.json
         run: |
           git config user.name "SimBot"
           git config user.email "bot@users.noreply.github.com"
