@@ -1,12 +1,50 @@
 import os
+import re
 import json
 import time
 import random
+import difflib
 import requests
 from datetime import datetime
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 DASHBOARD_URL = os.getenv("DASHBOARD_URL", "https://rockodevxda.github.io/ncaa-sim/")
+
+# Common ESPN -> BartTorvik naming aliases
+TEAM_ALIASES = {
+    "ul monroe": "louisiana monroe",
+    "ulm": "louisiana monroe",
+    "ul lafayette": "louisiana",
+    "uconn": "connecticut",
+    "umass": "massachusetts",
+    "unc": "north carolina",
+    "unlv": "nevada las vegas",
+    "usc": "southern california",
+    "smu": "southern methodist",
+    "tcu": "texas christian",
+    "vcu": "virginia commonwealth",
+    "ucf": "central florida",
+    "utep": "texas el paso",
+    "utsa": "texas san antonio",
+    "lsu": "louisiana state",
+    "ole miss": "mississippi",
+    "miss state": "mississippi state",
+    "pitt": "pittsburgh",
+    "miami": "miami fl",
+    "st johns": "st johns",
+    "saint marys": "saint marys",
+    "nc state": "north carolina state",
+    "penn": "pennsylvania",
+    "cal": "california",
+}
+
+
+def normalize_name(name: str) -> str:
+    s = name.lower().strip()
+    s = re.sub(r"[^\w\s]", "", s)
+    s = re.sub(r"\bst\b", "state", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return TEAM_ALIASES.get(s, s)
 
 
 def fetch_todays_games():
@@ -44,9 +82,11 @@ def fetch_todays_games():
             "has_line": has_line,
             "away_team": away["team"]["displayName"],
             "away_short": away["team"].get("shortDisplayName", away["team"]["displayName"]),
+            "away_location": away["team"].get("location", away["team"]["displayName"]),
             "away_record": away.get("records", [{}])[0].get("summary", "0-0"),
             "home_team": home["team"]["displayName"],
             "home_short": home["team"].get("shortDisplayName", home["team"]["displayName"]),
+            "home_location": home["team"].get("location", home["team"]["displayName"]),
             "home_record": home.get("records", [{}])[0].get("summary", "0-0"),
         })
     return games
@@ -57,21 +97,46 @@ def fetch_efficiency_ratings():
     url = f"https://barttorvik.com/{year}_team_results.json"
     try:
         data = requests.get(url, timeout=15).json()
-        return {
-            row[1]: {
+        ratings = {}
+        for row in data:
+            norm = normalize_name(row[1])
+            ratings[norm] = {
                 "adj_o": round(float(row[4]), 1),
                 "adj_d": round(float(row[6]), 1),
                 "tempo": round(float(row[15]), 1),
             }
-            for row in data
-        }
+        return ratings
     except Exception:
         return {}
 
 
+def lookup_team_stats(game, side, ratings):
+    candidates = [
+        game[f"{side}_location"],
+        game[f"{side}_short"],
+        game[f"{side}_team"],
+    ]
+    all_keys = list(ratings.keys())
+
+    for c in candidates:
+        norm = normalize_name(c)
+        if norm in ratings:
+            return ratings[norm], True
+
+    # Fuzzy match fallback (e.g., "alcorn state" vs "alcorn st")
+    for c in candidates:
+        norm = normalize_name(c)
+        matches = difflib.get_close_matches(norm, all_keys, n=1, cutoff=0.82)
+        if matches:
+            return ratings[matches[0]], True
+
+    # Unmatched / Non-D1 fallback (penalized baseline so non-D1 teams don't look like D1 average)
+    return {"adj_o": 94.0, "adj_d": 114.0, "tempo": 67.5}, False
+
+
 def run_monte_carlo(game, ratings, n_sims=10000):
-    away_stats = ratings.get(game["away_short"], ratings.get(game["away_team"], {"adj_o": 105.0, "adj_d": 105.0, "tempo": 68.0}))
-    home_stats = ratings.get(game["home_short"], ratings.get(game["home_team"], {"adj_o": 105.0, "adj_d": 105.0, "tempo": 68.0}))
+    away_stats, away_matched = lookup_team_stats(game, "away", ratings)
+    home_stats, home_matched = lookup_team_stats(game, "home", ratings)
 
     hca = 0.0 if game["neutral"] else 3.2
     exp_tempo = (away_stats["tempo"] + home_stats["tempo"]) / 2.0
@@ -124,8 +189,12 @@ def run_monte_carlo(game, ratings, n_sims=10000):
         spread_pick = f"{game['away_short']} {away_spread:+g}" if away_spread != 0 else f"{game['away_short']} PK"
         spread_cover_pct = away_cover_pct
 
+    # Only eligible for parlay value picks if both teams matched real D1 ratings & spread isn't a 35+ pt blowout
+    verified_d1 = away_matched and home_matched and abs(home_spread) <= 24.5 and edge_pts <= 12.0
+
     return {
         **game,
+        "verified_d1": verified_d1,
         "away_adj_o": away_stats["adj_o"],
         "away_adj_d": away_stats["adj_d"],
         "home_adj_o": home_stats["adj_o"],
@@ -166,11 +235,10 @@ def send_discord_report(results):
         )
         return
 
-    lined_games = [g for g in results if g["has_line"]]
-    top_spreads = sorted(lined_games, key=lambda x: x["spread_cover_pct"], reverse=True)
-    top_ml = sorted(results, key=lambda x: x["favored_prob"], reverse=True)
+    verified_lined = [g for g in results if g["has_line"] and g["verified_d1"]]
+    top_spreads = sorted(verified_lined, key=lambda x: x["spread_cover_pct"], reverse=True)
+    top_ml = sorted([g for g in results if g["verified_d1"]], key=lambda x: x["favored_prob"], reverse=True)
 
-    # Build 4-Team Optimal Parlay (Top 2 Spread Edges + Top 2 High-Probability MLs, no duplicate games)
     parlay_legs = []
     used_ids = set()
 
@@ -179,7 +247,7 @@ def send_discord_report(results):
             "game": f"{g['away_short']} @ {g['home_short']}",
             "pick": g["spread_pick"],
             "prob": g["spread_cover_pct"],
-            "note": f"+{g['edge_pts']} pt model edge vs {g['market_line']}",
+            "note": f"+{g['edge_pts']} pt model edge vs {g['market_line']} (Sim: {g['away_proj']}-{g['home_proj']})",
         })
         used_ids.add(g["id"])
 
@@ -191,7 +259,7 @@ def send_discord_report(results):
                 "game": f"{g['away_short']} @ {g['home_short']}",
                 "pick": f"{g['favored_team']} ML",
                 "prob": g["favored_prob"],
-                "note": f"Sim: {g['away_proj']} - {g['home_proj']}",
+                "note": f"Sim: {g['away_proj']} - {g['home_proj']} • Line: {g['market_line']}",
             })
             used_ids.add(g["id"])
 
@@ -214,7 +282,7 @@ def send_discord_report(results):
         "url": DASHBOARD_URL,
         "description": (
             f"**Combined Hit Rate:** `{parlay_pct}%` (**Fair Odds: {prob_to_american_odds(parlay_pct)}**)\n"
-            f"Combines top ATS spread edges + highest-probability ML anchors. [Open Interactive Dashboard]({DASHBOARD_URL})"
+            f"Verified D1 efficiency matchups (top ATS edges + ML anchors). [Open Interactive Dashboard]({DASHBOARD_URL})"
         ),
         "color": 3066993,
         "fields": parlay_fields,
@@ -256,4 +324,4 @@ if __name__ == "__main__":
         json.dump(results, f, indent=2)
 
     send_discord_report(results)
-    print(f"Completed {len(results)} simulations with Top 4-Team Edge Parlay.")
+    print(f"Completed {len(results)} verified simulations.")
