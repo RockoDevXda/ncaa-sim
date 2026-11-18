@@ -2,7 +2,7 @@ name: Nightly NCAA D1 Simulation
 
 on:
   schedule:
-    - cron: '15 6 * * *'
+    - cron: '15 6 * * *' # Runs daily at 12:15 AM CST (6:15 AM UTC)
   workflow_dispatch:
 
 permissions:
@@ -21,12 +21,11 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install requests beautifulsoup4 lxml pandas
+        run: pip install requests
 
-      - name: Run Monte Carlo Simulation
+      - name: Run NCAA Monte Carlo Simulation (ESPN)
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          API_SPORTS_KEY: ${{ secrets.API_SPORTS_KEY }}
           DASHBOARD_URL: "https://rockodevxda.github.io/sports-command-center/"
         run: python daily_runner.py
 
