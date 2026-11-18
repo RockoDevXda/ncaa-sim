@@ -28,7 +28,6 @@ def fetch_todays_games():
 
         odds_info = comp.get("odds", [{}])[0] if comp.get("odds") else {}
         spread_details = odds_info.get("details", "PK")
-        # ESPN odds 'spread' is relative to home team (negative = home favored, positive = away favored)
         home_spread = float(odds_info.get("spread", 0.0) or 0.0)
         has_line = bool(odds_info.get("details"))
 
@@ -97,7 +96,6 @@ def run_monte_carlo(game, ratings, n_sims=10000):
         if a_pts > h_pts:
             away_wins += 1
 
-        # Check ATS cover against home_spread (home_score + home_spread > away_score)
         if (h_pts + home_spread) > a_pts:
             home_covers += 1
         elif (h_pts + home_spread) < a_pts:
@@ -111,11 +109,9 @@ def run_monte_carlo(game, ratings, n_sims=10000):
     favored_team = game["away_short"] if away_prob >= home_prob else game["home_short"]
     favored_prob = max(away_prob, home_prob)
 
-    # Calculate ATS Spread Edge vs Vegas
     home_cover_pct = round((home_covers / n_sims) * 100, 1)
     away_cover_pct = round((away_covers / n_sims) * 100, 1)
 
-    # Simulated home margin vs implied Vegas home margin (-home_spread)
     sim_home_margin = home_proj - away_proj
     vegas_home_margin = -home_spread
     edge_pts = round(abs(sim_home_margin - vegas_home_margin), 1)
@@ -170,68 +166,62 @@ def send_discord_report(results):
         )
         return
 
-    # 1. Rank Top Spread Edges (only games with posted Vegas lines)
     lined_games = [g for g in results if g["has_line"]]
-    top_spreads = sorted(lined_games, key=lambda x: x["spread_cover_pct"], reverse=True)[:5]
+    top_spreads = sorted(lined_games, key=lambda x: x["spread_cover_pct"], reverse=True)
+    top_ml = sorted(results, key=lambda x: x["favored_prob"], reverse=True)
 
-    spread_fields = []
-    for g in top_spreads:
-        neutral_tag = " *(Neutral)*" if g["neutral"] else ""
-        spread_fields.append({
-            "name": f"💎 {g['spread_pick']} — Cover Rate: {g['spread_cover_pct']}% (+{g['edge_pts']} pt edge)",
-            "value": (
-                f"**{g['away_short']}** ({g['away_proj']}) @ **{g['home_short']}** ({g['home_proj']}){neutral_tag}\n"
-                f"Vegas Line: `{g['market_line']}` • Fair Odds: `{prob_to_american_odds(g['spread_cover_pct'])}`"
-            ),
-            "inline": False,
+    # Build 4-Team Optimal Parlay (Top 2 Spread Edges + Top 2 High-Probability MLs, no duplicate games)
+    parlay_legs = []
+    used_ids = set()
+
+    for g in top_spreads[:2]:
+        parlay_legs.append({
+            "game": f"{g['away_short']} @ {g['home_short']}",
+            "pick": g["spread_pick"],
+            "prob": g["spread_cover_pct"],
+            "note": f"+{g['edge_pts']} pt model edge vs {g['market_line']}",
         })
+        used_ids.add(g["id"])
 
-    if not spread_fields:
-        spread_fields.append({
-            "name": "⏳ Opening Spreads Pending",
-            "value": "Sportsbooks have not posted point spreads yet; check the dashboard or re-run closer to tipoff.",
-            "inline": False,
-        })
+    for g in top_ml:
+        if len(parlay_legs) >= 4:
+            break
+        if g["id"] not in used_ids:
+            parlay_legs.append({
+                "game": f"{g['away_short']} @ {g['home_short']}",
+                "pick": f"{g['favored_team']} ML",
+                "prob": g["favored_prob"],
+                "note": f"Sim: {g['away_proj']} - {g['home_proj']}",
+            })
+            used_ids.add(g["id"])
 
-    embed_spreads = {
-        "title": f"💎 Top Model Spread Edges vs. Vegas — {date_label}",
-        "url": DASHBOARD_URL,
-        "description": f"Games where our `10,000`-run simulation disagrees most with sportsbook spreads. [Open Interactive Dashboard]({DASHBOARD_URL})",
-        "color": 3066993,  # Emerald Green
-        "fields": spread_fields,
-    }
-
-    # 2. Rank Top Moneyline Locks & 3-Leg Parlay
-    ranked_ml = sorted(results, key=lambda x: x["favored_prob"], reverse=True)
-    top_ml = ranked_ml[:5]
-    top_3 = ranked_ml[:3]
     parlay_prob = 1.0
-    for g in top_3:
-        parlay_prob *= (g["favored_prob"] / 100.0)
+    for leg in parlay_legs:
+        parlay_prob *= (leg["prob"] / 100.0)
     parlay_pct = round(parlay_prob * 100, 1)
 
-    ml_fields = []
-    for g in top_ml:
-        ml_fields.append({
-            "name": f"🔒 {g['favored_team']} ML ({g['favored_prob']}% | Fair {prob_to_american_odds(g['favored_prob'])})",
-            "value": f"**{g['away_short']}** ({g['away_proj']}) @ **{g['home_short']}** ({g['home_proj']}) • Line: `{g['market_line']}`",
+    parlay_fields = [
+        {
+            "name": f"Leg {i+1}: {leg['pick']} ({leg['prob']}% | Fair {prob_to_american_odds(leg['prob'])})",
+            "value": f"**{leg['game']}** • {leg['note']}",
             "inline": False,
-        })
+        }
+        for i, leg in enumerate(parlay_legs)
+    ]
 
-    parlay_legs_str = " + ".join([f"**{g['favored_team']}** ({g['favored_prob']}%)" for g in top_3])
-    ml_fields.append({
-        "name": f"🎯 Top 3-Leg Moneyline Parlay — Hit Rate: {parlay_pct}% ({prob_to_american_odds(parlay_pct)})",
-        "value": parlay_legs_str,
-        "inline": False,
-    })
-
-    embed_ml = {
-        "title": f"🔒 Top Moneyline Locks & Parlay — {date_label}",
-        "color": 15844367,  # Gold
-        "fields": ml_fields,
+    embed_parlay = {
+        "title": f"🎯 Top 4-Team Edge Parlay — {date_label}",
+        "url": DASHBOARD_URL,
+        "description": (
+            f"**Combined Hit Rate:** `{parlay_pct}%` (**Fair Odds: {prob_to_american_odds(parlay_pct)}**)\n"
+            f"Combines top ATS spread edges + highest-probability ML anchors. [Open Interactive Dashboard]({DASHBOARD_URL})"
+        ),
+        "color": 3066993,
+        "fields": parlay_fields,
+        "footer": {"text": "NCAA Monte Carlo Engine • Auto-Updated at 12:15 AM CST"},
+        "timestamp": datetime.utcnow().isoformat() + "Z",
     }
 
-    # 3. Compact Full-Slate Overview
     slate_lines = [
         f"• **{g['away_short']}** `{g['away_proj']}` ({g['away_win_pct']}%) @ **{g['home_short']}** `{g['home_proj']}` ({g['home_win_pct']}%) `[{g['market_line']}]`"
         for g in results[:35]
@@ -240,11 +230,9 @@ def send_discord_report(results):
         "title": f"📋 Full Slate Projections ({len(results)} Games)",
         "description": "\n".join(slate_lines)[:3900],
         "color": 3447003,
-        "footer": {"text": "NCAA Monte Carlo Engine • Auto-Updated at 12:15 AM CST"},
-        "timestamp": datetime.utcnow().isoformat() + "Z",
     }
 
-    payload = {"username": "NCAA Monte Carlo Engine", "embeds": [embed_spreads, embed_ml, embed_slate]}
+    payload = {"username": "NCAA Monte Carlo Engine", "embeds": [embed_parlay, embed_slate]}
     with open("daily_slate.json", "rb") as json_file:
         files = {
             "payload_json": (None, json.dumps(payload), "application/json"),
@@ -268,4 +256,4 @@ if __name__ == "__main__":
         json.dump(results, f, indent=2)
 
     send_discord_report(results)
-    print(f"Completed {len(results)} simulations with ATS spread edges.")
+    print(f"Completed {len(results)} simulations with Top 4-Team Edge Parlay.")
