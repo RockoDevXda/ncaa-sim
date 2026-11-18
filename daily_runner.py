@@ -1,24 +1,23 @@
 import os
 import re
+import io
 import json
 import time
 import random
 import difflib
 import requests
+import pandas as pd
+import xml.etree.ElementTree as ET
 from datetime import datetime
-from kenpompy.utils import login as kp_login
-import kenpompy.summary as kp_summary
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
-KENPOM_EMAIL = os.getenv("KENPOM_EMAIL", "")
-KENPOM_PASSWORD = os.getenv("KENPOM_PASSWORD", "")
 DASHBOARD_URL = os.getenv("DASHBOARD_URL", "https://rockodevxda.github.io/sports-command-center/")
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 }
 
-ESPN_TO_KENPOM = {
+TEAM_ALIASES = {
     "ul monroe": "louisiana monroe",
     "ulm": "louisiana monroe",
     "ul lafayette": "louisiana",
@@ -39,80 +38,99 @@ ESPN_TO_KENPOM = {
     "mississippi state": "mississippi st",
     "pitt": "pittsburgh",
     "miami": "miami fl",
-    "miami oh": "miami oh",
-    "st johns": "st johns",
-    "saint marys": "saint marys",
     "nc state": "north carolina st",
-    "penn": "penn",
+    "penn": "pennsylvania",
     "cal": "california",
     "siu edwardsville": "siue",
-    "ualbany": "albany",
     "app state": "appalachian st",
     "sam houston": "sam houston st",
-    "se louisiana": "southeastern louisiana",
     "ut martin": "tennessee martin",
-    "ut arlington": "ut arlington",
     "ut rio grande valley": "utrgv",
     "uic": "illinois chicago",
-    "umbc": "umbc",
     "umkc": "kansas city",
     "omaha": "nebraska omaha",
-    "little rock": "little rock",
-    "queens": "queens",
-    "st thomas": "st thomas",
 }
 
 espn_stats_cache = {}
 
 
-def normalize_for_kp(name: str) -> str:
+def normalize_team(name: str) -> str:
     s = name.lower().strip()
-    s = re.sub(r"\d+$", "", s).strip()
+    s = re.sub(r"\([^)]*\)", "", s)
     s = re.sub(r"[^\w\s]", "", s)
     s = re.sub(r"\bstate\b", "st", s)
     s = re.sub(r"\s+", " ", s).strip()
-    return ESPN_TO_KENPOM.get(s, s)
+    return TEAM_ALIASES.get(s, s)
 
 
-def fetch_kenpom_ratings():
-    """Authenticates via kenpompy CloudScraper and fetches AdjO, AdjD, and AdjT for all D1 teams."""
-    if not KENPOM_EMAIL or not KENPOM_PASSWORD:
-        print("KenPom credentials missing; falling back to ESPN efficiency.")
-        return {}
+def fetch_haslametrics_ratings():
+    """Fetches free tempo-free schedule-adjusted efficiency & pace from Haslametrics."""
+    season_yr = str(datetime.now().year + 1 if datetime.now().month >= 7 else datetime.now().year)[-2:]
+    xml_url = f"https://haslametrics.com/ratings{season_yr}.xml"
+    ratings = {}
 
     try:
-        browser = kp_login(KENPOM_EMAIL, KENPOM_PASSWORD)
-        df = kp_summary.get_efficiency(browser)
-
-        ratings = {}
-        for _, row in df.iterrows():
-            team_raw = str(row.get("Team", "")).strip()
-            if not team_raw or team_raw in ("Team", "nan"):
-                continue
-
-            team_clean = re.sub(r"\s+\d+$", "", team_raw).strip()
-            norm_key = normalize_for_kp(team_clean)
-
-            try:
-                adj_o = float(row.get("AdjO", row.get("ORtg", 105.0)))
-                adj_d = float(row.get("AdjD", row.get("DRtg", 105.0)))
-                adj_t = float(row.get("AdjT", row.get("Tempo-Adj", 68.0)))
-
-                ratings[norm_key] = {
-                    "kp_name": team_clean,
-                    "adj_o": round(adj_o, 1),
-                    "adj_d": round(adj_d, 1),
-                    "tempo": round(adj_t, 1),
-                    "source": "KenPom",
-                }
-            except (ValueError, TypeError):
-                continue
-
-        print(f"Successfully loaded {len(ratings)} teams from KenPom.")
-        return ratings
+        resp = requests.get(xml_url, headers=HEADERS, timeout=15)
+        if resp.status_code == 200 and "<" in resp.text:
+            root = ET.fromstring(resp.text)
+            for mr in root.findall(".//mr"):
+                team_raw = mr.attrib.get("t", "").strip()
+                if not team_raw:
+                    continue
+                norm = normalize_team(team_raw)
+                try:
+                    adj_o = float(mr.attrib.get("ou", 105.0))
+                    adj_d = float(mr.attrib.get("du", 105.0))
+                    tempo = float(mr.attrib.get("p", 68.0))
+                    ratings[norm] = {
+                        "adj_o": round(adj_o, 1),
+                        "adj_d": round(adj_d, 1),
+                        "tempo": round(tempo, 1),
+                        "source": "Haslametrics",
+                    }
+                except (ValueError, TypeError):
+                    continue
+            if len(ratings) > 100:
+                print(f"Successfully loaded {len(ratings)} teams from Haslametrics XML.")
+                return ratings
     except Exception as e:
-        print(f"KenPom fetch warning ({e}); falling back to ESPN stats.")
-        return {}
+        print(f"Haslametrics XML note ({e}); trying HTML table fallback.")
+
+    # HTML table fallback on Haslametrics main ratings page
+    try:
+        resp = requests.get("https://haslametrics.com/ratings.php", headers=HEADERS, timeout=15)
+        if resp.status_code == 200:
+            tables = pd.read_html(io.StringIO(resp.text))
+            for df in tables:
+                if len(df) < 100:
+                    continue
+                if isinstance(df.columns, pd.MultiIndex):
+                    df.columns = [str(col[-1]) for col in df.columns]
+                cols = [str(c) for c in df.columns]
+                team_col = next((c for c in cols if "Team" in c), None)
+                off_col = next((c for c in cols if c in ("Eff", "O_Eff", "Off")), None)
+                def_col = next((c for c in cols if c in ("Eff.1", "D_Eff", "Def")), None)
+                pace_col = next((c for c in cols if "Pace" in c or "Tempo" in c), None)
+                if team_col and off_col and def_col:
+                    for _, row in df.iterrows():
+                        t_raw = re.sub(r"\s+\(\d+-\d+\)$", "", str(row[team_col])).strip()
+                        norm = normalize_team(t_raw)
+                        try:
+                            ratings[norm] = {
+                                "adj_o": round(float(row[off_col]), 1),
+                                "adj_d": round(float(row[def_col]), 1),
+                                "tempo": round(float(row[pace_col]), 1) if pace_col else 68.0,
+                                "source": "Haslametrics",
+                            }
+                        except (ValueError, TypeError):
+                            continue
+                    if len(ratings) > 100:
+                        print(f"Successfully loaded {len(ratings)} teams from Haslametrics HTML.")
+                        return ratings
+    except Exception as e:
+        print(f"Haslametrics HTML note ({e}); using live ESPN team efficiency.")
+
+    return {}
 
 
 def fetch_todays_games():
@@ -202,38 +220,38 @@ def fetch_espn_fallback(team_id, record_str):
     return res
 
 
-def get_team_efficiency(game, side, kp_ratings):
-    if kp_ratings:
+def get_team_efficiency(game, side, hasla_ratings):
+    if hasla_ratings:
         candidates = [
             game[f"{side}_location"],
             game[f"{side}_short"],
             game[f"{side}_team"],
         ]
-        kp_keys = list(kp_ratings.keys())
+        keys = list(hasla_ratings.keys())
 
         for c in candidates:
-            norm = normalize_for_kp(c)
-            if norm in kp_ratings:
-                return kp_ratings[norm], True
+            norm = normalize_team(c)
+            if norm in hasla_ratings:
+                return hasla_ratings[norm], True
 
         for c in candidates:
-            norm = normalize_for_kp(c)
-            matches = difflib.get_close_matches(norm, kp_keys, n=1, cutoff=0.84)
+            norm = normalize_team(c)
+            matches = difflib.get_close_matches(norm, keys, n=1, cutoff=0.84)
             if matches:
-                return kp_ratings[matches[0]], True
+                return hasla_ratings[matches[0]], True
 
     fb = fetch_espn_fallback(game[f"{side}_id"], game[f"{side}_record"])
     return fb, (fb["source"] == "ESPN")
 
 
-def run_monte_carlo(game, kp_ratings, n_sims=10000):
-    away_stats, away_ok = get_team_efficiency(game, "away", kp_ratings)
-    home_stats, home_ok = get_team_efficiency(game, "home", kp_ratings)
+def run_monte_carlo(game, hasla_ratings, n_sims=10000):
+    away_stats, away_ok = get_team_efficiency(game, "away", hasla_ratings)
+    home_stats, home_ok = get_team_efficiency(game, "home", hasla_ratings)
 
-    hca = 0.0 if game["neutral"] else 3.4
+    hca = 0.0 if game["neutral"] else 3.3
     exp_tempo = (away_stats["tempo"] + home_stats["tempo"]) / 2.0
 
-    league_avg = 106.0
+    league_avg = 105.5
     away_exp_eff = league_avg + (away_stats["adj_o"] - league_avg) + (home_stats["adj_d"] - league_avg)
     home_exp_eff = league_avg + (home_stats["adj_o"] - league_avg) + (away_stats["adj_d"] - league_avg) + hca
 
@@ -283,7 +301,7 @@ def run_monte_carlo(game, kp_ratings, n_sims=10000):
         spread_cover_pct = away_cover_pct
 
     verified_d1 = away_ok and home_ok and abs(home_spread) <= 24.5 and edge_pts <= 13.0
-    rating_source = "KenPom" if (away_stats["source"] == "KenPom" and home_stats["source"] == "KenPom") else "ESPN"
+    rating_source = "Haslametrics" if (away_stats["source"] == "Haslametrics" and home_stats["source"] == "Haslametrics") else "ESPN"
 
     return {
         **game,
@@ -316,7 +334,7 @@ def prob_to_american_odds(prob_pct):
     return f"+{int(round(100 * (1 - p) / p))}"
 
 
-def send_discord_report(results, kp_active):
+def send_discord_report(results, hasla_active):
     if not DISCORD_WEBHOOK_URL:
         return
 
@@ -324,7 +342,7 @@ def send_discord_report(results, kp_active):
     if not results:
         requests.post(
             DISCORD_WEBHOOK_URL,
-            json={"username": "NCAA KenPom Engine", "content": f"🏀 **{date_label}:** No NCAA D1 games scheduled today."},
+            json={"username": "NCAA Monte Carlo Engine", "content": f"🏀 **{date_label}:** No NCAA D1 games scheduled today."},
             timeout=15,
         )
         return
@@ -373,7 +391,7 @@ def send_discord_report(results, kp_active):
         for i, leg in enumerate(parlay_legs)
     ]
 
-    source_badge = "KenPom AdjO/AdjD/Tempo" if kp_active else "ESPN Efficiency"
+    source_badge = "Haslametrics AdjO/AdjD/Pace" if hasla_active else "ESPN Efficiency"
     embed_parlay = {
         "title": f"🎯 Top 4-Team Edge Parlay ({source_badge}) — {date_label}",
         "url": DASHBOARD_URL,
@@ -397,7 +415,7 @@ def send_discord_report(results, kp_active):
         "color": 3447003,
     }
 
-    payload = {"username": "NCAA KenPom Engine", "embeds": [embed_parlay, embed_slate]}
+    payload = {"username": "NCAA Monte Carlo Engine", "embeds": [embed_parlay, embed_slate]}
     with open("daily_slate.json", "rb") as json_file:
         files = {
             "payload_json": (None, json.dumps(payload), "application/json"),
@@ -413,12 +431,12 @@ def send_discord_report(results, kp_active):
 
 
 if __name__ == "__main__":
-    kp_ratings = fetch_kenpom_ratings()
+    hasla_ratings = fetch_haslametrics_ratings()
     games = fetch_todays_games()
-    results = [run_monte_carlo(g, kp_ratings, n_sims=10000) for g in games]
+    results = [run_monte_carlo(g, hasla_ratings, n_sims=10000) for g in games]
 
     with open("daily_slate.json", "w") as f:
         json.dump(results, f, indent=2)
 
-    send_discord_report(results, kp_active=bool(kp_ratings))
-    print(f"Completed {len(results)} simulations (KenPom active: {bool(kp_ratings)}).")
+    send_discord_report(results, hasla_active=bool(hasla_ratings))
+    print(f"Completed {len(results)} simulations (Haslametrics active: {bool(hasla_ratings)}).")
