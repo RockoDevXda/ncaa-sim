@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NCAA D1 Full-Slate Monte Carlo Simulator</title>
+  <style>
+    :root {
+      --bg: #0b0f17;
+      --panel: #131a26;
+      --panel-hover: #182232;
+      --border: #243044;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #10b981;
+      --accent-dim: rgba(16, 185, 129, 0.15);
+      --blue: #3b82f6;
+      --amber: #f59e0b;
+      --danger: #ef4444;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding-bottom: 100px;
+    }
+    header {
+      background: linear-gradient(180deg, #111827 0%, var(--bg) 100%);
+      border-bottom: 1px solid var(--border);
+      padding: 20px 24px;
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      backdrop-filter: blur(10px);
+    }
+    .header-inner {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .brand h1 { font-size: 1.25rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .badge-live {
+      background: var(--accent-dim);
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-weight: 600;
+    }
+    .sub { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
+    .controls-bar {
+      max-width: 1400px;
+      margin: 20px auto 12px;
+      padding: 0 24px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 12px;
+    }
+    .control-box {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .control-box label {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.78rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+    .control-box input[type="range"] { width: 100%; accent-color: var(--accent); }
+    .control-box input[type="text"], .control-box select {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 10px;
+      border-radius: 6px;
+      font-size: 0.88rem;
+    }
+    .grid {
+      max-width: 1400px;
+      margin: 16px auto;
+      padding: 0 24px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(410px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: border-color 0.15s;
+    }
+    .card:hover { border-color: #364866; }
+    .card.in-slip { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+    .card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+    .line-pill {
+      background: #1e293b;
+      color: var(--amber);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-weight: 600;
+      font-family: monospace;
+    }
+    .teams { display: flex; flex-direction: column; gap: 8px; }
+    .team-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(11, 15, 23, 0.55);
+      padding: 8px 12px;
+      border-radius: 8px;
+    }
+    .team-name { font-weight: 600; font-size: 0.96rem; }
+    .team-meta { font-size: 0.75rem; color: var(--muted); }
+    .team-nums { text-align: right; }
+    .proj-score { font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .win-pct { font-size: 0.78rem; font-weight: 600; }
+    .fav { color: var(--accent); }
+    .dog { color: var(--muted); }
+    canvas.hist {
+      width: 100%;
+      height: 76px;
+      background: #0b0f17;
+      border-radius: 8px;
+      border: 1px solid #1e293b;
+    }
+    .card-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 2px;
+    }
+    button {
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: #1e293b;
+      color: var(--text);
+      padding: 7px 12px;
+      border-radius: 7px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+    button:hover { background: #29374d; }
+    button.primary { background: var(--accent); color: #052e16; border-color: var(--accent); }
+    button.primary:hover { filter: brightness(1.08); }
+    .tweak-drawer {
+      display: none;
+      border-top: 1px solid var(--border);
+      padding-top: 10px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      gap: 8px;
+      flex-direction: column;
+    }
+    .tweak-drawer.open { display: flex; }
+    .parlay-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #0f172a;
+      border-top: 1px solid var(--accent);
+      padding: 12px 24px;
+      z-index: 50;
+      box-shadow: 0 -8px 25px rgba(0, 0, 0, 0.5);
+    }
+    .parlay-inner {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .slip-legs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .leg-chip {
+      background: var(--accent-dim);
+      border: 1px solid var(--accent);
+      color: var(--text);
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .leg-chip span { cursor: pointer; color: var(--danger); font-weight: bold; }
+    .empty-state {
+      grid-column: 1 / -1;
+      text-align: center;
+      padding: 48px;
+      color: var(--muted);
+      background: var(--panel);
+      border-radius: 12px;
+      border: 1px dashed var(--border);
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <div class="brand">
+      <h1>🏀 NCAA D1 Full-Slate Monte Carlo Simulator <span class="badge-live" id="statusBadge">LIVE AUTO-SYNC</span></h1>
+      <div class="sub" id="slateSubtitle">Loading daily_slate.json...</div>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button onclick="rerunAll()">↻ Re-Simulate Slate</button>
+    </div>
+  </div>
+</header>
+
+<section class="controls-bar">
+  <div class="control-box">
+    <label><span>Search Team / Venue</span></label>
+    <input type="text" id="searchInput" placeholder="e.g. Duke, Marist, Pitt..." oninput="renderCards()" />
+  </div>
+  <div class="control-box">
+    <label><span>Filter Slate</span></label>
+    <select id="filterSelect" onchange="renderCards()">
+      <option value="all">All Games on Slate</option>
+      <option value="slip">My Parlay Slip Only</option>
+      <option value="high">High Confidence Edges (≥ 65%)</option>
+      <option value="close">Coin-Flip Matchups (&lt; 57%)</option>
+    </select>
+  </div>
+  <div class="control-box">
+    <label><span>Home Court Advantage</span><span id="hcaVal">+3.2 pts</span></label>
+    <input type="range" id="hcaSlider" min="0" max="6" step="0.2" value="3.2" oninput="updateGlobalParams()" />
+  </div>
+  <div class="control-box">
+    <label><span>Game Variance (σ)</span><span id="varVal">10.5</span></label>
+    <input type="range" id="varSlider" min="7" max="14" step="0.5" value="10.5" oninput="updateGlobalParams()" />
+  </div>
+</section>
+
+<main class="grid" id="cardsGrid"></main>
+
+<div class="parlay-bar">
+  <div class="parlay-inner">
+    <div class="slip-legs" id="slipLegs">
+      <strong style="font-size:0.85rem; color:var(--accent);">🎯 Parlay Slip:</strong>
+      <span style="font-size:0.82rem; color:var(--muted);">Click "+ Pick Away" or "+ Pick Home" on any game card</span>
+    </div>
+    <div style="display:flex; align-items:center; gap:16px;">
+      <div style="text-align:right;">
+        <div style="font-size:0.75rem; color:var(--muted);">Combined Simulated Hit Rate</div>
+        <div style="font-size:1.05rem; font-weight:700; color:var(--accent);" id="parlayStats">0.0% (N/A)</div>
+      </div>
+      <button onclick="clearSlip()">Clear</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  let rawGames = [];
+  let simCache = {};
+  let slip = []; // { id, team, side, prob }
+
+  function gaussianRandom(mean = 0, stdev = 1) {
+    const u = 1 - Math.random();
+    const v = Math.random();
+    const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+    return z * stdev + mean;
+  }
+
+  function probToAmerican(pct) {
+    const p = pct / 100;
+    if (p <= 0 || p >= 1) return "N/A";
+    return p >= 0.5 ? `${Math.round(-100 * p / (1 - p))}` : `+${Math.round(100 * (1 - p) / p)}`;
+  }
+
+  function simulateGame(g, runs = 4000) {
+    const baseHca = parseFloat(document.getElementById("hcaSlider").value);
+    const sigma = parseFloat(document.getElementById("varSlider").value);
+    const hca = g.neutral ? 0.0 : baseHca;
+
+    const awayAdjO = g.away_adj_o ?? 105.0;
+    const awayAdjD = g.away_adj_d ?? 105.0;
+    const homeAdjO = g.home_adj_o ?? 105.0;
+    const homeAdjD = g.home_adj_d ?? 105.0;
+    const tempo = g.tempo ?? 68.0;
+
+    const awayEff = 105.0 + (awayAdjO - 105.0) + (homeAdjD - 105.0) + (g.away_boost || 0);
+    const homeEff = 105.0 + (homeAdjO - 105.0) + (awayAdjD - 105.0) + hca + (g.home_boost || 0);
+
+    let awayWins = 0, aSum = 0, hSum = 0;
+    const margins = []; // home - away
+
+    for (let i = 0; i < runs; i++) {
+      const poss = gaussianRandom(tempo, 2.8);
+      const aPts = (gaussianRandom(awayEff, sigma) / 100) * poss;
+      const hPts = (gaussianRandom(homeEff, sigma) / 100) * poss;
+      aSum += aPts;
+      hSum += hPts;
+      if (aPts > hPts) awayWins++;
+      margins.push(hPts - aPts);
+    }
+
+    const awayProb = +(awayWins / runs * 100).toFixed(1);
+    const homeProb = +(100 - awayProb).toFixed(1);
+    const projMargin = +((hSum - aSum) / runs).toFixed(1);
+
+    simCache[g.id] = {
+      awayProj: +(aSum / runs).toFixed(1),
+      homeProj: +(hSum / runs).toFixed(1),
+      awayProb,
+      homeProb,
+      projMargin,
+      margins
+    };
+  }
+
+  function drawHistogram(canvasId, margins) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const w = canvas.width = canvas.offsetWidth * 2;
+    const h = canvas.height = 152;
+    ctx.clearRect(0, 0, w, h);
+
+    // Bins from -30 (Away +30) to +30 (Home +30)
+    const minM = -30, maxM = 30, binCount = 30;
+    const binSize = (maxM - minM) / binCount;
+    const bins = new Array(binCount).fill(0);
+
+    for (const m of margins) {
+      const idx = Math.max(0, Math.min(binCount - 1, Math.floor((m - minM) / binSize)));
+      bins[idx]++;
+    }
+    const maxCount = Math.max(...bins, 1);
+
+    bins.forEach((count, i) => {
+      const x = (i / binCount) * w;
+      const bw = (w / binCount) - 3;
+      const bh = (count / maxCount) * (h - 24);
+      const binCenter = minM + (i + 0.5) * binSize;
+      ctx.fillStyle = binCenter >= 0 ? "#10b981" : "#3b82f6";
+      ctx.fillRect(x + 1.5, h - bh - 14, bw, bh);
+    });
+
+    // Center 0-line
+    ctx.strokeStyle = "#94a3b8";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 4);
+    ctx.lineTo(w / 2, h - 12);
+    ctx.stroke();
+
+    ctx.fillStyle = "#94a3b8";
+    ctx.font = "18px sans-serif";
+    ctx.fillText("◀ Away Win", 12, 22);
+    ctx.fillText("Home Win ▶", w - 115, 22);
+  }
+
+  function togglePick(gameId, side) {
+    const g = rawGames.find(x => x.id === gameId);
+    const sim = simCache[gameId];
+    if (!g || !sim) return;
+
+    const team = side === "away" ? g.away_short : g.home_short;
+    const prob = side === "away" ? sim.awayProb : sim.homeProb;
+
+    const existingIdx = slip.findIndex(s => s.id === gameId && s.side === side);
+    if (existingIdx !== -1) {
+      slip.splice(existingIdx, 1);
+    } else {
+      slip = slip.filter(s => s.id !== gameId);
+      slip.push({ id: gameId, team, side, prob });
+    }
+    updateSlipBar();
+    renderCards();
+  }
+
+  function clearSlip() {
+    slip = [];
+    updateSlipBar();
+    renderCards();
+  }
+
+  function updateSlipBar() {
+    const container = document.getElementById("slipLegs");
+    const statsEl = document.getElementById("parlayStats");
+
+    if (slip.length === 0) {
+      container.innerHTML = `<strong style="font-size:0.85rem; color:var(--accent);">🎯 Parlay Slip:</strong>
+        <span style="font-size:0.82rem; color:var(--muted);">Click "+ Away" or "+ Home" on any game card</span>`;
+      statsEl.textContent = "0.0% (N/A)";
+      return;
+    }
+
+    let combined = 1.0;
+    slip.forEach(s => {
+      const latest = simCache[s.id];
+      if (latest) s.prob = s.side === "away" ? latest.awayProb : latest.homeProb;
+      combined *= (s.prob / 100);
+    });
+
+    const pct = +(combined * 100).toFixed(1);
+    statsEl.textContent = `${pct}% (${probToAmerican(pct)})`;
+
+    container.innerHTML = `<strong style="font-size:0.85rem; color:var(--accent);">🎯 Slip (${slip.length}):</strong>` +
+      slip.map(s => `<div class="leg-chip">${s.team} ML (${s.prob}%) <span onclick="togglePick('${s.id}','${s.side}')">×</span></div>`).join("");
+  }
+
+  function adjustBoost(gameId, side, val) {
+    const g = rawGames.find(x => x.id === gameId);
+    if (!g) return;
+    if (side === "away") g.away_boost = parseFloat(val);
+    if (side === "home") g.home_boost = parseFloat(val);
+    simulateGame(g);
+    updateSlipBar();
+    renderCards();
+  }
+
+  function renderCards() {
+    const grid = document.getElementById("cardsGrid");
+    const q = document.getElementById("searchInput").value.toLowerCase().trim();
+    const filter = document.getElementById("filterSelect").value;
+
+    const filtered = rawGames.filter(g => {
+      const sim = simCache[g.id];
+      const maxProb = Math.max(sim.awayProb, sim.homeProb);
+      const matchesText = !q ||
+        g.away_team.toLowerCase().includes(q) ||
+        g.home_team.toLowerCase().includes(q) ||
+        (g.venue || "").toLowerCase().includes(q);
+      if (!matchesText) return false;
+
+      if (filter === "slip") return slip.some(s => s.id === g.id);
+      if (filter === "high") return maxProb >= 65.0;
+      if (filter === "close") return maxProb < 57.0;
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      grid.innerHTML = `<div class="empty-state">No matchups match your current search or filter.</div>`;
+      return;
+    }
+
+    grid.innerHTML = filtered.map(g => {
+      const sim = simCache[g.id];
+      const awayFav = sim.awayProb >= sim.homeProb;
+      const inSlip = slip.find(s => s.id === g.id);
+      const simLine = sim.projMargin > 0
+        ? `${g.home_short} -${sim.projMargin}`
+        : `${g.away_short} -${Math.abs(sim.projMargin)}`;
+
+      return `
+        <article class="card ${inSlip ? 'in-slip' : ''}">
+          <div class="card-top">
+            <span>${g.tipoff || ''} • ${g.venue || ''} ${g.neutral ? '(Neutral)' : ''}</span>
+            <span class="line-pill">Book: ${g.market_line || 'PK'} | Sim: ${simLine}</span>
+          </div>
+          <div class="teams">
+            <div class="team-row">
+              <div>
+                <div class="team-name">${g.away_team} <span class="team-meta">(${g.away_record || ''})</span></div>
+                <div class="team-meta">AdjO: ${g.away_adj_o ?? 105} • AdjD: ${g.away_adj_d ?? 105}</div>
+              </div>
+              <div class="team-nums">
+                <div class="proj-score ${awayFav ? 'fav' : ''}">${sim.awayProj}</div>
+                <div class="win-pct ${awayFav ? 'fav' : 'dog'}">${sim.awayProb}% (${probToAmerican(sim.awayProb)})</div>
+              </div>
+            </div>
+            <div class="team-row">
+              <div>
+                <div class="team-name">${g.home_team} <span class="team-meta">(${g.home_record || ''})</span></div>
+                <div class="team-meta">AdjO: ${g.home_adj_o ?? 105} • AdjD: ${g.home_adj_d ?? 105}</div>
+              </div>
+              <div class="team-nums">
+                <div class="proj-score ${!awayFav ? 'fav' : ''}">${sim.homeProj}</div>
+                <div class="win-pct ${!awayFav ? 'fav' : 'dog'}">${sim.homeProb}% (${probToAmerican(sim.homeProb)})</div>
+              </div>
+            </div>
+          </div>
+          <canvas class="hist" id="hist-${g.id}"></canvas>
+          <div class="card-actions">
+            <div style="display:flex; gap:6px;">
+              <button class="${inSlip?.side === 'away' ? 'primary' : ''}" onclick="togglePick('${g.id}','away')">+ ${g.away_short}</button>
+              <button class="${inSlip?.side === 'home' ? 'primary' : ''}" onclick="togglePick('${g.id}','home')">+ ${g.home_short}</button>
+            </div>
+            <button onclick="document.getElementById('tweak-${g.id}').classList.toggle('open')">⚙ What-If</button>
+          </div>
+          <div class="tweak-drawer" id="tweak-${g.id}">
+            <label>${g.away_short} Efficiency Adj (${g.away_boost || 0} pts):
+              <input type="range" min="-8" max="8" step="0.5" value="${g.away_boost || 0}" onchange="adjustBoost('${g.id}','away',this.value)" />
+            </label>
+            <label>${g.home_short} Efficiency Adj (${g.home_boost || 0} pts):
+              <input type="range" min="-8" max="8" step="0.5" value="${g.home_boost || 0}" onchange="adjustBoost('${g.id}','home',this.value)" />
+            </label>
+          </div>
+        </article>
+      `;
+    }).join("");
+
+    requestAnimationFrame(() => {
+      filtered.forEach(g => drawHistogram(`hist-${g.id}`, simCache[g.id].margins));
+    });
+  }
+
+  function updateGlobalParams() {
+    document.getElementById("hcaVal").textContent = `+${parseFloat(document.getElementById("hcaSlider").value).toFixed(1)} pts`;
+    document.getElementById("varVal").textContent = parseFloat(document.getElementById("varSlider").value).toFixed(1);
+    rerunAll();
+  }
+
+  function rerunAll() {
+    rawGames.forEach(g => simulateGame(g));
+    updateSlipBar();
+    renderCards();
+  }
+
+  async function init() {
+    try {
+      const resp = await fetch(`./daily_slate.json?t=${Date.now()}`);
+      if (!resp.ok) throw new Error("No daily_slate.json yet");
+      rawGames = await resp.json();
+      const updated = rawGames[0]?.generated_at || "Today";
+      document.getElementById("slateSubtitle").textContent =
+        `${rawGames.length} NCAA D1 Games Loaded • Auto-Updated: ${updated}`;
+      rerunAll();
+    } catch (err) {
+      document.getElementById("statusBadge").textContent = "WAITING FOR FIRST RUN";
+      document.getElementById("slateSubtitle").textContent =
+        "Run your GitHub Action once to generate daily_slate.json, then refresh this page.";
+    }
+  }
+
+  init();
+</script>
+</body>
+</html>
