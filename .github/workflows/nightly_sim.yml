@@ -2,7 +2,8 @@ name: Nightly NCAA D1 Simulation
 
 on:
   schedule:
-    - cron: '15 6 * * *' # Runs daily at 12:15 AM CST (6:15 AM UTC)
+    - cron: '15 6 * * *'
+    - cron: '15 21 * * *'
   workflow_dispatch:
 
 permissions:
@@ -23,7 +24,7 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run NCAA Monte Carlo Simulation (ESPN)
+      - name: Run NCAA Monte Carlo Simulation (ESPN + Line Tracking)
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           DASHBOARD_URL: "https://rockodevxda.github.io/sports-command-center/"
@@ -34,4 +35,4 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add daily_slate.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update daily NCAA slate" && git push)
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update daily NCAA slate & line movement" && git pull --rebase && git push)
