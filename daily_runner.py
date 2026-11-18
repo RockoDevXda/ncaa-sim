@@ -15,7 +15,28 @@ HEADERS = {
 espn_stats_cache = {}
 
 
-def fetch_todays_games():
+def load_previous_lines():
+    """Reads existing daily_slate.json to preserve opening spreads & totals for line movement tracking."""
+    if not os.path.exists("daily_slate.json"):
+        return {}
+    try:
+        with open("daily_slate.json", "r") as f:
+            prev = json.load(f)
+        out = {}
+        for g in prev:
+            gid = str(g.get("id", ""))
+            if gid:
+                out[gid] = {
+                    "open_line": g.get("open_line") or g.get("market_line"),
+                    "open_spread": g.get("open_spread") if g.get("open_spread") is not None else g.get("home_spread"),
+                    "open_total": g.get("open_total") if g.get("open_total") is not None else g.get("over_under"),
+                }
+        return out
+    except Exception:
+        return {}
+
+
+def fetch_todays_games(prev_lines):
     today_str = datetime.now().strftime("%Y%m%d")
     url = (
         f"https://site.api.espn.com/apis/site/v2/sports/basketball/"
@@ -42,17 +63,42 @@ def fetch_todays_games():
         has_line = bool(odds_info.get("details"))
         has_total = game_ou > 90.0
 
+        gid = str(event["id"])
+        prior = prev_lines.get(gid, {})
+
+        # Preserve opening line if captured earlier today; otherwise set current as opening
+        open_line = prior.get("open_line") if (prior.get("open_line") and prior.get("open_line") != "PK") else spread_details
+        open_spread = prior.get("open_spread") if (prior.get("open_spread") not in (None, 0.0) or not has_line) else home_spread
+        open_total = prior.get("open_total") if (prior.get("open_total") and prior.get("open_total") > 90.0) else game_ou
+
+        spread_move = round(home_spread - float(open_spread or 0.0), 1) if has_line else 0.0
+        total_move = round(game_ou - float(open_total or 0.0), 1) if (has_total and open_total and open_total > 90.0) else 0.0
+
+        move_badges = []
+        if has_line and abs(spread_move) >= 1.0 and open_line != spread_details:
+            move_badges.append(f"📉 {open_line} → {spread_details}")
+        if has_total and abs(total_move) >= 1.5:
+            arrow = "⬆️" if total_move > 0 else "⬇️"
+            move_badges.append(f"{arrow} O/U {open_total:g} → {game_ou:g}")
+
         tip_dt = datetime.fromisoformat(event["date"].replace("Z", "+00:00"))
         tip_str = tip_dt.strftime("%I:%M %p UTC")
 
         games.append({
-            "id": event["id"],
+            "id": gid,
             "tipoff": tip_str,
             "venue": comp.get("venue", {}).get("fullName", "TBD"),
             "neutral": comp.get("neutralSite", False),
+            "open_line": open_line,
+            "open_spread": open_spread,
             "market_line": spread_details,
             "home_spread": home_spread,
+            "spread_move": spread_move,
+            "open_total": open_total,
             "over_under": game_ou,
+            "total_move": total_move,
+            "move_badges": move_badges,
+            "has_move": len(move_badges) > 0,
             "has_line": has_line,
             "has_total": has_total,
             "away_id": away["team"]["id"],
@@ -176,7 +222,6 @@ def run_monte_carlo(game, n_sims=10000):
         spread_pick = f"{game['away_short']} {away_spread:+g}" if away_spread != 0 else f"{game['away_short']} PK"
         spread_cover_pct = away_cover_pct
 
-    # Game Total (Over / Under) evaluation
     if game["has_total"]:
         over_pct = round((total_overs / n_sims) * 100, 1)
         under_pct = round((total_unders / n_sims) * 100, 1)
@@ -249,11 +294,12 @@ def send_discord_report(results):
     used_ids = set()
 
     for g in top_spreads[:2]:
+        move_note = f" • {' '.join(g['move_badges'])}" if g.get("move_badges") else ""
         parlay_legs.append({
             "game": f"{g['away_short']} @ {g['home_short']}",
             "pick": g["spread_pick"],
             "prob": g["spread_cover_pct"],
-            "note": f"+{g['edge_pts']} pt edge vs `{g['market_line']}` (Sim: {g['away_proj']}-{g['home_proj']})",
+            "note": f"+{g['edge_pts']} pt edge vs `{g['market_line']}` (Sim: {g['away_proj']}-{g['home_proj']}){move_note}",
         })
         used_ids.add(g["id"])
 
@@ -304,16 +350,20 @@ def send_discord_report(results):
         ),
         "color": 3066993,
         "fields": parlay_fields,
-        "footer": {"text": "SimLab NCAA Engine • ESPN Live Data"},
+        "footer": {"text": "SimLab NCAA Engine • ESPN Line-Move Telemetry"},
         "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
+    movers = [g for g in results if g.get("has_move")]
+    slate_source = movers if len(movers) >= 6 else results
+    slate_title = f"📉 Sharp Line Movers ({len(movers)} Games Moved)" if len(movers) >= 6 else f"📋 Full Slate Projections ({len(results)} Games)"
+
     slate_lines = [
-        f"• **{g['away_short']}** `{g['away_proj']}` @ **{g['home_short']}** `{g['home_proj']}` | Tot `{g['total_proj']}` `[{g['market_line']} | {g['total_pick']}]`"
-        for g in results[:35]
+        f"• **{g['away_short']}** `{g['away_proj']}` @ **{g['home_short']}** `{g['home_proj']}` | Tot `{g['total_proj']}` `[{g['market_line']} | {g['total_pick']}]` {' '.join(g.get('move_badges', []))}"
+        for g in slate_source[:30]
     ]
     embed_slate = {
-        "title": f"📋 Full Slate Projections ({len(results)} Games)",
+        "title": slate_title,
         "description": "\n".join(slate_lines)[:3900],
         "color": 3447003,
     }
@@ -334,11 +384,13 @@ def send_discord_report(results):
 
 
 if __name__ == "__main__":
-    games = fetch_todays_games()
+    prev_lines = load_previous_lines()
+    games = fetch_todays_games(prev_lines)
     results = [run_monte_carlo(g, n_sims=10000) for g in games]
 
     with open("daily_slate.json", "w") as f:
         json.dump(results, f, indent=2)
 
     send_discord_report(results)
-    print(f"Completed {len(results)} NCAA simulations via ESPN.")
+    movers_cnt = sum(1 for g in results if g.get("has_move"))
+    print(f"Completed {len(results)} NCAA simulations ({movers_cnt} line moves detected).")
