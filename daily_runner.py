@@ -40,6 +40,7 @@ def fetch_todays_games():
         home_spread = float(odds_info.get("spread", 0.0) or 0.0)
         game_ou = float(odds_info.get("overUnder", 0.0) or 0.0)
         has_line = bool(odds_info.get("details"))
+        has_total = game_ou > 90.0
 
         tip_dt = datetime.fromisoformat(event["date"].replace("Z", "+00:00"))
         tip_str = tip_dt.strftime("%I:%M %p UTC")
@@ -53,6 +54,7 @@ def fetch_todays_games():
             "home_spread": home_spread,
             "over_under": game_ou,
             "has_line": has_line,
+            "has_total": has_total,
             "away_id": away["team"]["id"],
             "away_team": away["team"]["displayName"],
             "away_short": away_short,
@@ -119,14 +121,19 @@ def run_monte_carlo(game, n_sims=10000):
     away_wins = 0
     home_covers = 0
     away_covers = 0
+    total_overs = 0
+    total_unders = 0
     away_pts_total = 0.0
     home_pts_total = 0.0
     home_spread = game["home_spread"]
+    game_ou = game["over_under"]
 
     for _ in range(n_sims):
         poss = random.gauss(exp_tempo, 2.7)
         a_pts = (random.gauss(away_exp_eff, 10.2) / 100.0) * poss
         h_pts = (random.gauss(home_exp_eff, 10.2) / 100.0) * poss
+        comb_pts = a_pts + h_pts
+
         away_pts_total += a_pts
         home_pts_total += h_pts
 
@@ -138,8 +145,16 @@ def run_monte_carlo(game, n_sims=10000):
         elif (h_pts + home_spread) < a_pts:
             away_covers += 1
 
+        if game["has_total"]:
+            if comb_pts > game_ou:
+                total_overs += 1
+            elif comb_pts < game_ou:
+                total_unders += 1
+
     away_proj = round(away_pts_total / n_sims, 1)
     home_proj = round(home_pts_total / n_sims, 1)
+    total_proj = round(away_proj + home_proj, 1)
+
     away_prob = round((away_wins / n_sims) * 100, 1)
     home_prob = round(100.0 - away_prob, 1)
 
@@ -161,6 +176,22 @@ def run_monte_carlo(game, n_sims=10000):
         spread_pick = f"{game['away_short']} {away_spread:+g}" if away_spread != 0 else f"{game['away_short']} PK"
         spread_cover_pct = away_cover_pct
 
+    # Game Total (Over / Under) evaluation
+    if game["has_total"]:
+        over_pct = round((total_overs / n_sims) * 100, 1)
+        under_pct = round((total_unders / n_sims) * 100, 1)
+        total_edge_pts = round(abs(total_proj - game_ou), 1)
+        if over_pct >= under_pct:
+            total_pick = f"O {game_ou:g}"
+            total_cover_pct = over_pct
+        else:
+            total_pick = f"U {game_ou:g}"
+            total_cover_pct = under_pct
+    else:
+        total_pick = "No Total"
+        total_cover_pct = 0.0
+        total_edge_pts = 0.0
+
     verified_d1 = away_stats["verified"] and home_stats["verified"] and abs(home_spread) <= 24.5 and edge_pts <= 13.0
 
     return {
@@ -169,6 +200,7 @@ def run_monte_carlo(game, n_sims=10000):
         "verified_d1": verified_d1,
         "away_proj": away_proj,
         "home_proj": home_proj,
+        "total_proj": total_proj,
         "away_win_pct": away_prob,
         "home_win_pct": home_prob,
         "favored_team": favored_team,
@@ -176,6 +208,9 @@ def run_monte_carlo(game, n_sims=10000):
         "spread_pick": spread_pick,
         "spread_cover_pct": spread_cover_pct,
         "edge_pts": edge_pts,
+        "total_pick": total_pick,
+        "total_cover_pct": total_cover_pct,
+        "total_edge_pts": total_edge_pts,
         "generated_at": datetime.now().strftime("%Y-%m-%d %I:%M %p"),
     }
 
@@ -204,8 +239,10 @@ def send_discord_report(results):
 
     pool = [g for g in results if g["verified_d1"]] or results
     lined_pool = [g for g in pool if g["has_line"]]
+    totals_pool = [g for g in pool if g["has_total"] and g["total_edge_pts"] <= 14.0]
 
     top_spreads = sorted(lined_pool, key=lambda x: x["spread_cover_pct"], reverse=True)
+    top_totals = sorted(totals_pool, key=lambda x: x["total_cover_pct"], reverse=True)
     top_ml = sorted(pool, key=lambda x: x["favored_prob"], reverse=True)
 
     parlay_legs = []
@@ -219,6 +256,18 @@ def send_discord_report(results):
             "note": f"+{g['edge_pts']} pt edge vs `{g['market_line']}` (Sim: {g['away_proj']}-{g['home_proj']})",
         })
         used_ids.add(g["id"])
+
+    for g in top_totals:
+        if len(parlay_legs) >= 3:
+            break
+        if g["id"] not in used_ids:
+            parlay_legs.append({
+                "game": f"{g['away_short']} @ {g['home_short']}",
+                "pick": f"{g['home_short']}/{g['away_short']} {g['total_pick']}",
+                "prob": g["total_cover_pct"],
+                "note": f"Sim Total: `{g['total_proj']}` vs O/U `{g['over_under']}` (+{g['total_edge_pts']} edge)",
+            })
+            used_ids.add(g["id"])
 
     for g in top_ml:
         if len(parlay_legs) >= 4:
@@ -247,11 +296,11 @@ def send_discord_report(results):
     ]
 
     embed_parlay = {
-        "title": f"🎯 Top 4-Team NCAA Edge Parlay — {date_label}",
+        "title": f"🎯 Top 4-Team NCAA Edge Parlay (ATS + Totals) — {date_label}",
         "url": DASHBOARD_URL,
         "description": (
             f"**Combined Hit Rate:** `{parlay_pct}%` (**Fair Odds: {prob_to_american_odds(parlay_pct)}**)\n"
-            f"10,000-run simulation vs. live Vegas lines. [Open Command Center]({DASHBOARD_URL})"
+            f"10,000-run simulation vs. live Vegas lines & totals. [Open Command Center]({DASHBOARD_URL})"
         ),
         "color": 3066993,
         "fields": parlay_fields,
@@ -260,7 +309,7 @@ def send_discord_report(results):
     }
 
     slate_lines = [
-        f"• **{g['away_short']}** `{g['away_proj']}` ({g['away_win_pct']}%) @ **{g['home_short']}** `{g['home_proj']}` ({g['home_win_pct']}%) `[{g['market_line']}]`"
+        f"• **{g['away_short']}** `{g['away_proj']}` @ **{g['home_short']}** `{g['home_proj']}` | Tot `{g['total_proj']}` `[{g['market_line']} | {g['total_pick']}]`"
         for g in results[:35]
     ]
     embed_slate = {
