@@ -23,9 +23,10 @@ jobs:
       - name: Install dependencies
         run: pip install requests beautifulsoup4 lxml pandas
 
-      - name: Run Monte Carlo Simulation (Haslametrics + ESPN)
+      - name: Run Monte Carlo Simulation (Haslametrics + API-Sports + ESPN)
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          API_SPORTS_KEY: ${{ secrets.API_SPORTS_KEY }}
           DASHBOARD_URL: "https://rockodevxda.github.io/sports-command-center/"
         run: python daily_runner.py
 
