@@ -1,13 +1,13 @@
 import os
 import re
-import io
 import json
 import time
 import random
 import difflib
 import requests
-import pandas as pd
 from datetime import datetime
+from kenpompy.utils import login as kp_login
+import kenpompy.summary as kp_summary
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 KENPOM_EMAIL = os.getenv("KENPOM_EMAIL", "")
@@ -18,7 +18,6 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 }
 
-# ESPN -> KenPom exact naming bridge
 ESPN_TO_KENPOM = {
     "ul monroe": "louisiana monroe",
     "ulm": "louisiana monroe",
@@ -68,7 +67,7 @@ espn_stats_cache = {}
 
 def normalize_for_kp(name: str) -> str:
     s = name.lower().strip()
-    s = re.sub(r"\d+$", "", s).strip()  # strip KenPom seed numbers if present
+    s = re.sub(r"\d+$", "", s).strip()
     s = re.sub(r"[^\w\s]", "", s)
     s = re.sub(r"\bstate\b", "st", s)
     s = re.sub(r"\s+", " ", s).strip()
@@ -76,41 +75,14 @@ def normalize_for_kp(name: str) -> str:
 
 
 def fetch_kenpom_ratings():
-    """Logs into KenPom and parses AdjO, AdjD, AdjT, and Luck for all 364 D1 teams."""
+    """Authenticates via kenpompy CloudScraper and fetches AdjO, AdjD, and AdjT for all D1 teams."""
     if not KENPOM_EMAIL or not KENPOM_PASSWORD:
-        print("KenPom credentials not set; falling back to ESPN efficiency.")
+        print("KenPom credentials missing; falling back to ESPN efficiency.")
         return {}
 
     try:
-        session = requests.Session()
-        session.headers.update(HEADERS)
-
-        # Load homepage first to initialize session cookies
-        session.get("https://kenpom.com/", timeout=15)
-
-        login_payload = {
-            "email": KENPOM_EMAIL,
-            "password": KENPOM_PASSWORD,
-            "submit": "Login!",
-        }
-        login_resp = session.post(
-            "https://kenpom.com/handlers/login_handler.php",
-            data=login_payload,
-            timeout=15,
-        )
-        login_resp.raise_for_status()
-
-        home_resp = session.get("https://kenpom.com/index.php", timeout=15)
-        home_resp.raise_for_status()
-
-        tables = pd.read_html(io.StringIO(home_resp.text))
-        if not tables:
-            return {}
-
-        df = tables[0]
-        # Flatten multi-index columns if present
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [col[-1] for col in df.columns]
+        browser = kp_login(KENPOM_EMAIL, KENPOM_PASSWORD)
+        df = kp_summary.get_efficiency(browser)
 
         ratings = {}
         for _, row in df.iterrows():
@@ -118,24 +90,19 @@ def fetch_kenpom_ratings():
             if not team_raw or team_raw in ("Team", "nan"):
                 continue
 
-            # KenPom appends seed numbers to tournament teams (e.g., "Connecticut 1")
             team_clean = re.sub(r"\s+\d+$", "", team_raw).strip()
             norm_key = normalize_for_kp(team_clean)
 
             try:
-                adj_em = float(row.get("AdjEM", row.get("NetRtg", 0.0)))
                 adj_o = float(row.get("AdjO", row.get("ORtg", 105.0)))
                 adj_d = float(row.get("AdjD", row.get("DRtg", 105.0)))
-                adj_t = float(row.get("AdjT", 68.0))
-                luck = float(row.get("Luck", 0.0))
+                adj_t = float(row.get("AdjT", row.get("Tempo-Adj", 68.0)))
 
                 ratings[norm_key] = {
                     "kp_name": team_clean,
-                    "adj_em": round(adj_em, 2),
                     "adj_o": round(adj_o, 1),
                     "adj_d": round(adj_d, 1),
                     "tempo": round(adj_t, 1),
-                    "luck": round(luck, 3),
                     "source": "KenPom",
                 }
             except (ValueError, TypeError):
@@ -224,13 +191,13 @@ def fetch_espn_fallback(team_id, record_str):
                 parts = record_str.split("-")
                 win_pct = int(parts[0]) / max(1, int(parts[0]) + int(parts[1])) if len(parts) == 2 else 0.5
                 adj_d = round(107.0 - (win_pct * 8.5), 1)
-                res = {"adj_o": adj_o, "adj_d": adj_d, "tempo": round(poss, 1), "luck": 0.0, "source": "ESPN"}
+                res = {"adj_o": adj_o, "adj_d": adj_d, "tempo": round(poss, 1), "source": "ESPN"}
                 espn_stats_cache[team_id] = res
                 return res
     except Exception:
         pass
 
-    res = {"adj_o": 95.0, "adj_d": 112.0, "tempo": 67.5, "luck": 0.0, "source": "Fallback"}
+    res = {"adj_o": 95.0, "adj_d": 112.0, "tempo": 67.5, "source": "Fallback"}
     espn_stats_cache[team_id] = res
     return res
 
@@ -263,11 +230,9 @@ def run_monte_carlo(game, kp_ratings, n_sims=10000):
     away_stats, away_ok = get_team_efficiency(game, "away", kp_ratings)
     home_stats, home_ok = get_team_efficiency(game, "home", kp_ratings)
 
-    # KenPom Home-Court Advantage is ~3.4 pts per 100 possessions; 0.0 on neutral floors
     hca = 0.0 if game["neutral"] else 3.4
     exp_tempo = (away_stats["tempo"] + home_stats["tempo"]) / 2.0
 
-    # KenPom efficiency expectation (National D1 average baseline = 106.0)
     league_avg = 106.0
     away_exp_eff = league_avg + (away_stats["adj_o"] - league_avg) + (home_stats["adj_d"] - league_avg)
     home_exp_eff = league_avg + (home_stats["adj_o"] - league_avg) + (away_stats["adj_d"] - league_avg) + hca
