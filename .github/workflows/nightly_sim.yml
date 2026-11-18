@@ -29,7 +29,7 @@ jobs:
           DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
         run: python daily_runner.py
 
-- name: Commit & push updated daily_slate.json
+      - name: Commit and push updated daily_slate.json
         run: |
           git config user.name "SimBot"
           git config user.email "bot@users.noreply.github.com"
