@@ -1,15 +1,151 @@
 import os
+import re
+import io
 import json
 import time
 import random
+import difflib
 import requests
+import pandas as pd
 from datetime import datetime
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
-DASHBOARD_URL = os.getenv("DASHBOARD_URL", "https://rockodevxda.github.io/ncaa-sim/")
-HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+KENPOM_EMAIL = os.getenv("KENPOM_EMAIL", "")
+KENPOM_PASSWORD = os.getenv("KENPOM_PASSWORD", "")
+DASHBOARD_URL = os.getenv("DASHBOARD_URL", "https://rockodevxda.github.io/sports-command-center/")
 
-team_stats_cache = {}
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+}
+
+# ESPN -> KenPom exact naming bridge
+ESPN_TO_KENPOM = {
+    "ul monroe": "louisiana monroe",
+    "ulm": "louisiana monroe",
+    "ul lafayette": "louisiana",
+    "uconn": "connecticut",
+    "umass": "massachusetts",
+    "unc": "north carolina",
+    "unlv": "unlv",
+    "usc": "usc",
+    "smu": "smu",
+    "tcu": "tcu",
+    "vcu": "vcu",
+    "ucf": "ucf",
+    "utep": "utep",
+    "utsa": "utsa",
+    "lsu": "lsu",
+    "ole miss": "mississippi",
+    "miss state": "mississippi st",
+    "mississippi state": "mississippi st",
+    "pitt": "pittsburgh",
+    "miami": "miami fl",
+    "miami oh": "miami oh",
+    "st johns": "st johns",
+    "saint marys": "saint marys",
+    "nc state": "north carolina st",
+    "penn": "penn",
+    "cal": "california",
+    "siu edwardsville": "siue",
+    "ualbany": "albany",
+    "app state": "appalachian st",
+    "sam houston": "sam houston st",
+    "se louisiana": "southeastern louisiana",
+    "ut martin": "tennessee martin",
+    "ut arlington": "ut arlington",
+    "ut rio grande valley": "utrgv",
+    "uic": "illinois chicago",
+    "umbc": "umbc",
+    "umkc": "kansas city",
+    "omaha": "nebraska omaha",
+    "little rock": "little rock",
+    "queens": "queens",
+    "st thomas": "st thomas",
+}
+
+espn_stats_cache = {}
+
+
+def normalize_for_kp(name: str) -> str:
+    s = name.lower().strip()
+    s = re.sub(r"\d+$", "", s).strip()  # strip KenPom seed numbers if present
+    s = re.sub(r"[^\w\s]", "", s)
+    s = re.sub(r"\bstate\b", "st", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return ESPN_TO_KENPOM.get(s, s)
+
+
+def fetch_kenpom_ratings():
+    """Logs into KenPom and parses AdjO, AdjD, AdjT, and Luck for all 364 D1 teams."""
+    if not KENPOM_EMAIL or not KENPOM_PASSWORD:
+        print("KenPom credentials not set; falling back to ESPN efficiency.")
+        return {}
+
+    try:
+        session = requests.Session()
+        session.headers.update(HEADERS)
+
+        # Load homepage first to initialize session cookies
+        session.get("https://kenpom.com/", timeout=15)
+
+        login_payload = {
+            "email": KENPOM_EMAIL,
+            "password": KENPOM_PASSWORD,
+            "submit": "Login!",
+        }
+        login_resp = session.post(
+            "https://kenpom.com/handlers/login_handler.php",
+            data=login_payload,
+            timeout=15,
+        )
+        login_resp.raise_for_status()
+
+        home_resp = session.get("https://kenpom.com/index.php", timeout=15)
+        home_resp.raise_for_status()
+
+        tables = pd.read_html(io.StringIO(home_resp.text))
+        if not tables:
+            return {}
+
+        df = tables[0]
+        # Flatten multi-index columns if present
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [col[-1] for col in df.columns]
+
+        ratings = {}
+        for _, row in df.iterrows():
+            team_raw = str(row.get("Team", "")).strip()
+            if not team_raw or team_raw in ("Team", "nan"):
+                continue
+
+            # KenPom appends seed numbers to tournament teams (e.g., "Connecticut 1")
+            team_clean = re.sub(r"\s+\d+$", "", team_raw).strip()
+            norm_key = normalize_for_kp(team_clean)
+
+            try:
+                adj_em = float(row.get("AdjEM", row.get("NetRtg", 0.0)))
+                adj_o = float(row.get("AdjO", row.get("ORtg", 105.0)))
+                adj_d = float(row.get("AdjD", row.get("DRtg", 105.0)))
+                adj_t = float(row.get("AdjT", 68.0))
+                luck = float(row.get("Luck", 0.0))
+
+                ratings[norm_key] = {
+                    "kp_name": team_clean,
+                    "adj_em": round(adj_em, 2),
+                    "adj_o": round(adj_o, 1),
+                    "adj_d": round(adj_d, 1),
+                    "tempo": round(adj_t, 1),
+                    "luck": round(luck, 3),
+                    "source": "KenPom",
+                }
+            except (ValueError, TypeError):
+                continue
+
+        print(f"Successfully loaded {len(ratings)} teams from KenPom.")
+        return ratings
+    except Exception as e:
+        print(f"KenPom fetch warning ({e}); falling back to ESPN stats.")
+        return {}
 
 
 def fetch_todays_games():
@@ -48,89 +184,93 @@ def fetch_todays_games():
             "away_id": away["team"]["id"],
             "away_team": away["team"]["displayName"],
             "away_short": away["team"].get("shortDisplayName", away["team"]["displayName"]),
+            "away_location": away["team"].get("location", away["team"]["displayName"]),
             "away_record": away.get("records", [{}])[0].get("summary", "0-0"),
             "home_id": home["team"]["id"],
             "home_team": home["team"]["displayName"],
             "home_short": home["team"].get("shortDisplayName", home["team"]["displayName"]),
+            "home_location": home["team"].get("location", home["team"]["displayName"]),
             "home_record": home.get("records", [{}])[0].get("summary", "0-0"),
         })
     return games
 
 
-def fetch_espn_team_efficiency(team_id):
-    """Fetches real 2026-27 season PPG, Opponent PPG, and Tempo directly from ESPN by Team ID."""
-    if team_id in team_stats_cache:
-        return team_stats_cache[team_id]
+def fetch_espn_fallback(team_id, record_str):
+    if team_id in espn_stats_cache:
+        return espn_stats_cache[team_id]
 
     url = f"https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/teams/{team_id}/statistics"
     try:
         resp = requests.get(url, headers=HEADERS, timeout=10)
-        if resp.status_code != 200:
-            raise ValueError("No stats")
-        data = resp.json()
-        categories = data.get("results", {}).get("stats", {}).get("categories", [])
-
-        ppg = None
-        fga = 58.0
-        fta = 18.0
-        orb = 10.0
-        tov = 12.0
-
-        for cat in categories:
-            for stat in cat.get("stats", []):
-                name = stat.get("name", "")
-                val = float(stat.get("value", 0) or 0)
-                if name == "avgPoints":
-                    ppg = val
-                elif name == "avgFieldGoalsAttempted":
-                    fga = val
-                elif name == "avgFreeThrowsAttempted":
-                    fta = val
-                elif name == "avgOffensiveRebounds":
-                    orb = val
-                elif name == "avgTurnovers":
-                    tov = val
-
-        if ppg and ppg > 40:
-            # Estimate possessions per game using Dean Oliver's formula
-            est_poss = max(60.0, min(78.0, fga - orb + tov + (0.44 * fta)))
-            adj_o = round((ppg / est_poss) * 100.0, 1)
-            # Estimate defensive rating from team record win% if opponent PPG isn't in endpoint
-            stats = {"adj_o": adj_o, "adj_d": 103.5, "tempo": round(est_poss, 1), "ppg": round(ppg, 1), "matched": True}
-            team_stats_cache[team_id] = stats
-            return stats
+        if resp.status_code == 200:
+            categories = resp.json().get("results", {}).get("stats", {}).get("categories", [])
+            ppg, fga, fta, orb, tov = None, 58.0, 18.0, 10.0, 12.0
+            for cat in categories:
+                for stat in cat.get("stats", []):
+                    n, v = stat.get("name", ""), float(stat.get("value", 0) or 0)
+                    if n == "avgPoints":
+                        ppg = v
+                    elif n == "avgFieldGoalsAttempted":
+                        fga = v
+                    elif n == "avgFreeThrowsAttempted":
+                        fta = v
+                    elif n == "avgOffensiveRebounds":
+                        orb = v
+                    elif n == "avgTurnovers":
+                        tov = v
+            if ppg and ppg > 40:
+                poss = max(60.0, min(78.0, fga - orb + tov + (0.44 * fta)))
+                adj_o = round((ppg / poss) * 100.0, 1)
+                parts = record_str.split("-")
+                win_pct = int(parts[0]) / max(1, int(parts[0]) + int(parts[1])) if len(parts) == 2 else 0.5
+                adj_d = round(107.0 - (win_pct * 8.5), 1)
+                res = {"adj_o": adj_o, "adj_d": adj_d, "tempo": round(poss, 1), "luck": 0.0, "source": "ESPN"}
+                espn_stats_cache[team_id] = res
+                return res
     except Exception:
         pass
 
-    fallback = {"adj_o": 101.0, "adj_d": 106.0, "tempo": 68.0, "ppg": 70.0, "matched": False}
-    team_stats_cache[team_id] = fallback
-    return fallback
+    res = {"adj_o": 95.0, "adj_d": 112.0, "tempo": 67.5, "luck": 0.0, "source": "Fallback"}
+    espn_stats_cache[team_id] = res
+    return res
 
 
-def parse_win_pct(record_str):
-    try:
-        parts = record_str.split("-")
-        w, l = int(parts[0]), int(parts[1])
-        return w / max(1, (w + l))
-    except Exception:
-        return 0.5
+def get_team_efficiency(game, side, kp_ratings):
+    if kp_ratings:
+        candidates = [
+            game[f"{side}_location"],
+            game[f"{side}_short"],
+            game[f"{side}_team"],
+        ]
+        kp_keys = list(kp_ratings.keys())
+
+        for c in candidates:
+            norm = normalize_for_kp(c)
+            if norm in kp_ratings:
+                return kp_ratings[norm], True
+
+        for c in candidates:
+            norm = normalize_for_kp(c)
+            matches = difflib.get_close_matches(norm, kp_keys, n=1, cutoff=0.84)
+            if matches:
+                return kp_ratings[matches[0]], True
+
+    fb = fetch_espn_fallback(game[f"{side}_id"], game[f"{side}_record"])
+    return fb, (fb["source"] == "ESPN")
 
 
-def run_monte_carlo(game, n_sims=10000):
-    away_stats = fetch_espn_team_efficiency(game["away_id"])
-    home_stats = fetch_espn_team_efficiency(game["home_id"])
+def run_monte_carlo(game, kp_ratings, n_sims=10000):
+    away_stats, away_ok = get_team_efficiency(game, "away", kp_ratings)
+    home_stats, home_ok = get_team_efficiency(game, "home", kp_ratings)
 
-    # Adjust defensive rating using real win-loss strength
-    away_win_rate = parse_win_pct(game["away_record"])
-    home_win_rate = parse_win_pct(game["home_record"])
-    away_adj_d = round(107.0 - (away_win_rate * 8.5), 1)
-    home_adj_d = round(107.0 - (home_win_rate * 8.5), 1)
-
-    hca = 0.0 if game["neutral"] else 3.2
+    # KenPom Home-Court Advantage is ~3.4 pts per 100 possessions; 0.0 on neutral floors
+    hca = 0.0 if game["neutral"] else 3.4
     exp_tempo = (away_stats["tempo"] + home_stats["tempo"]) / 2.0
 
-    away_exp_eff = 105.0 + (away_stats["adj_o"] - 105.0) + (home_adj_d - 105.0)
-    home_exp_eff = 105.0 + (home_stats["adj_o"] - 105.0) + (away_adj_d - 105.0) + hca
+    # KenPom efficiency expectation (National D1 average baseline = 106.0)
+    league_avg = 106.0
+    away_exp_eff = league_avg + (away_stats["adj_o"] - league_avg) + (home_stats["adj_d"] - league_avg)
+    home_exp_eff = league_avg + (home_stats["adj_o"] - league_avg) + (away_stats["adj_d"] - league_avg) + hca
 
     away_wins = 0
     home_covers = 0
@@ -140,9 +280,9 @@ def run_monte_carlo(game, n_sims=10000):
     home_spread = game["home_spread"]
 
     for _ in range(n_sims):
-        poss = random.gauss(exp_tempo, 2.8)
-        a_pts = (random.gauss(away_exp_eff, 10.5) / 100.0) * poss
-        h_pts = (random.gauss(home_exp_eff, 10.5) / 100.0) * poss
+        poss = random.gauss(exp_tempo, 2.7)
+        a_pts = (random.gauss(away_exp_eff, 10.2) / 100.0) * poss
+        h_pts = (random.gauss(home_exp_eff, 10.2) / 100.0) * poss
         away_pts_total += a_pts
         home_pts_total += h_pts
 
@@ -177,16 +317,17 @@ def run_monte_carlo(game, n_sims=10000):
         spread_pick = f"{game['away_short']} {away_spread:+g}" if away_spread != 0 else f"{game['away_short']} PK"
         spread_cover_pct = away_cover_pct
 
-    # Filter out extreme 25+ pt buy-game blowouts so parlay focuses on real competitive D1 lines
-    competitive_d1 = away_stats["matched"] and home_stats["matched"] and abs(home_spread) <= 22.5
+    verified_d1 = away_ok and home_ok and abs(home_spread) <= 24.5 and edge_pts <= 13.0
+    rating_source = "KenPom" if (away_stats["source"] == "KenPom" and home_stats["source"] == "KenPom") else "ESPN"
 
     return {
         **game,
-        "competitive_d1": competitive_d1,
+        "rating_source": rating_source,
+        "verified_d1": verified_d1,
         "away_adj_o": away_stats["adj_o"],
-        "away_adj_d": away_adj_d,
+        "away_adj_d": away_stats["adj_d"],
         "home_adj_o": home_stats["adj_o"],
-        "home_adj_d": home_adj_d,
+        "home_adj_d": home_stats["adj_d"],
         "tempo": round(exp_tempo, 1),
         "away_proj": away_proj,
         "home_proj": home_proj,
@@ -210,7 +351,7 @@ def prob_to_american_odds(prob_pct):
     return f"+{int(round(100 * (1 - p) / p))}"
 
 
-def send_discord_report(results):
+def send_discord_report(results, kp_active):
     if not DISCORD_WEBHOOK_URL:
         return
 
@@ -218,13 +359,13 @@ def send_discord_report(results):
     if not results:
         requests.post(
             DISCORD_WEBHOOK_URL,
-            json={"username": "NCAA Monte Carlo Engine", "content": f"🏀 **{date_label}:** No NCAA D1 games scheduled today."},
+            json={"username": "NCAA KenPom Engine", "content": f"🏀 **{date_label}:** No NCAA D1 games scheduled today."},
             timeout=15,
         )
         return
 
-    pool = [g for g in results if g["competitive_d1"]] or results
-    lined_pool = [g for g in pool if g["has_line"] and g["edge_pts"] <= 14.0]
+    pool = [g for g in results if g["verified_d1"]] or results
+    lined_pool = [g for g in pool if g["has_line"]]
 
     top_spreads = sorted(lined_pool, key=lambda x: x["spread_cover_pct"], reverse=True)
     top_ml = sorted(pool, key=lambda x: x["favored_prob"], reverse=True)
@@ -267,16 +408,17 @@ def send_discord_report(results):
         for i, leg in enumerate(parlay_legs)
     ]
 
+    source_badge = "KenPom AdjO/AdjD/Tempo" if kp_active else "ESPN Efficiency"
     embed_parlay = {
-        "title": f"🎯 Top 4-Team Edge Parlay — {date_label}",
+        "title": f"🎯 Top 4-Team Edge Parlay ({source_badge}) — {date_label}",
         "url": DASHBOARD_URL,
         "description": (
             f"**Combined Hit Rate:** `{parlay_pct}%` (**Fair Odds: {prob_to_american_odds(parlay_pct)}**)\n"
-            f"Live 2026–27 ESPN efficiency + Vegas spread edges. [Open Interactive Dashboard]({DASHBOARD_URL})"
+            f"10,000-run tempo-free simulation vs. Vegas lines. [Open Command Center]({DASHBOARD_URL})"
         ),
         "color": 3066993,
         "fields": parlay_fields,
-        "footer": {"text": "NCAA Monte Carlo Engine • Auto-Updated at 12:15 AM CST"},
+        "footer": {"text": f"SimLab NCAA Engine • {source_badge}"},
         "timestamp": datetime.utcnow().isoformat() + "Z",
     }
 
@@ -290,7 +432,7 @@ def send_discord_report(results):
         "color": 3447003,
     }
 
-    payload = {"username": "NCAA Monte Carlo Engine", "embeds": [embed_parlay, embed_slate]}
+    payload = {"username": "NCAA KenPom Engine", "embeds": [embed_parlay, embed_slate]}
     with open("daily_slate.json", "rb") as json_file:
         files = {
             "payload_json": (None, json.dumps(payload), "application/json"),
@@ -306,14 +448,12 @@ def send_discord_report(results):
 
 
 if __name__ == "__main__":
+    kp_ratings = fetch_kenpom_ratings()
     games = fetch_todays_games()
-    results = []
-    for g in games:
-        results.append(run_monte_carlo(g, n_sims=10000))
-        time.sleep(0.1)
+    results = [run_monte_carlo(g, kp_ratings, n_sims=10000) for g in games]
 
     with open("daily_slate.json", "w") as f:
         json.dump(results, f, indent=2)
 
-    send_discord_report(results)
-    print(f"Completed {len(results)} simulations using live ESPN team stats.")
+    send_discord_report(results, kp_active=bool(kp_ratings))
+    print(f"Completed {len(results)} simulations (KenPom active: {bool(kp_ratings)}).")
