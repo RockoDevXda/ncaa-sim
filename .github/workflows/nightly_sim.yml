@@ -1,18 +1,18 @@
-name: Nightly NCAA Monte Carlo Sim
+name: Nightly NCAA D1 Simulation
 
 on:
   schedule:
-    - cron: '15 6 * * *'
+    - cron: '15 6 * * *' # Runs daily at 12:15 AM CST (6:15 AM UTC)
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  simulate-and-notify:
+  run-sim:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -21,19 +21,19 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests beautifulsoup4 lxml pandas
 
-      - name: Run daily simulation and post to Discord
+      - name: Run Monte Carlo Simulation (KenPom + ESPN)
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          DASHBOARD_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+          KENPOM_EMAIL: ${{ secrets.KENPOM_EMAIL }}
+          KENPOM_PASSWORD: ${{ secrets.KENPOM_PASSWORD }}
+          DASHBOARD_URL: "https://rockodevxda.github.io/sports-command-center/"
         run: python daily_runner.py
 
-      - name: Commit and push updated daily_slate.json
+      - name: Commit updated slate JSON
         run: |
-          git config user.name "SimBot"
-          git config user.email "bot@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add daily_slate.json
-          git commit -m "Auto-update slate for $(date +'%Y-%m-%d')" || exit 0
-          git pull --rebase origin main
-          git push
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update daily NCAA slate (KenPom)" && git push)
