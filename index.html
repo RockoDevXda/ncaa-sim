@@ -2,291 +2,567 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NCAA D1 Full-Slate Monte Carlo Simulator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#07090d" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SimLab" />
+  <link rel="icon" type="image/jpeg" href="./icon-512.png.jpeg" />
+  <link rel="apple-touch-icon" href="./icon-512.png.jpeg" />
+  <link rel="manifest" href="./manifest.json" />
+  <title>SimLab | Pro Sports Terminal</title>
   <style>
     :root {
-      --bg: #0b0f17;
-      --panel: #131a26;
-      --panel-hover: #182232;
-      --border: #243044;
-      --text: #e2e8f0;
-      --muted: #94a3b8;
-      --accent: #10b981;
-      --accent-dim: rgba(16, 185, 129, 0.15);
-      --blue: #3b82f6;
-      --amber: #f59e0b;
+      --bg: #07090d;
+      --card: #0e131a;
+      --card-hi: #141b24;
+      --border: #1c2532;
+      --text: #f8fafc;
+      --sub: #94a3b8;
+      --muted: #64748b;
+      --emerald: #10b981;
+      --emerald-dim: rgba(16, 185, 129, 0.16);
+      --orange: #f97316;
+      --orange-dim: rgba(249, 115, 22, 0.16);
+      --cyan: #38bdf8;
+      --cyan-dim: rgba(56, 189, 248, 0.14);
       --danger: #ef4444;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
       background: var(--bg);
       color: var(--text);
-      line-height: 1.5;
-      padding-bottom: 100px;
+      line-height: 1.35;
+      padding-bottom: 32px;
+      -webkit-font-smoothing: antialiased;
     }
+
+    body.has-slip { padding-bottom: 130px; }
+
+    .wrap {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 12px;
+    }
+
     header {
-      background: linear-gradient(180deg, #111827 0%, var(--bg) 100%);
+      padding: 12px 0 10px;
       border-bottom: 1px solid var(--border);
-      padding: 20px 24px;
-      position: sticky;
-      top: 0;
-      z-index: 40;
-      backdrop-filter: blur(10px);
     }
-    .header-inner {
-      max-width: 1400px;
-      margin: 0 auto;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 16px;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .brand h1 { font-size: 1.25rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
-    .badge-live {
-      background: var(--accent-dim);
-      color: var(--accent);
-      border: 1px solid var(--accent);
-      font-size: 0.72rem;
-      padding: 2px 8px;
-      border-radius: 999px;
-      font-weight: 600;
-    }
-    .sub { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
-    .controls-bar {
-      max-width: 1400px;
-      margin: 20px auto 12px;
-      padding: 0 24px;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-      gap: 12px;
-    }
-    .control-box {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px 14px;
-    }
-    .control-box label {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.78rem;
-      color: var(--muted);
-      margin-bottom: 6px;
-      font-weight: 600;
-    }
-    .control-box input[type="range"] { width: 100%; accent-color: var(--accent); }
-    .control-box input[type="text"], .control-box select {
-      width: 100%;
-      background: var(--bg);
-      border: 1px solid var(--border);
-      color: var(--text);
-      padding: 7px 10px;
-      border-radius: 6px;
-      font-size: 0.88rem;
-    }
-    .grid {
-      max-width: 1400px;
-      margin: 16px auto;
-      padding: 0 24px;
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(410px, 1fr));
-      gap: 16px;
-    }
-    .card {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      transition: border-color 0.15s;
-    }
-    .card:hover { border-color: #364866; }
-    .card.in-slip { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-    .card-top {
+
+    .top-row {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-size: 0.78rem;
-      color: var(--muted);
-    }
-    .line-pill {
-      background: #1e293b;
-      color: var(--amber);
-      padding: 2px 8px;
-      border-radius: 6px;
-      font-weight: 600;
-      font-family: monospace;
-    }
-    .teams { display: flex; flex-direction: column; gap: 8px; }
-    .team-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      background: rgba(11, 15, 23, 0.55);
-      padding: 8px 12px;
-      border-radius: 8px;
-    }
-    .team-name { font-weight: 600; font-size: 0.96rem; }
-    .team-meta { font-size: 0.75rem; color: var(--muted); }
-    .team-nums { text-align: right; }
-    .proj-score { font-size: 1.05rem; font-weight: 700; font-variant-numeric: tabular-nums; }
-    .win-pct { font-size: 0.78rem; font-weight: 600; }
-    .fav { color: var(--accent); }
-    .dog { color: var(--muted); }
-    canvas.hist {
-      width: 100%;
-      height: 76px;
-      background: #0b0f17;
-      border-radius: 8px;
-      border: 1px solid #1e293b;
-    }
-    .card-actions {
-      display: flex;
       gap: 8px;
-      align-items: center;
-      justify-content: space-between;
-      margin-top: 2px;
+      margin-bottom: 10px;
     }
-    button {
-      cursor: pointer;
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .brand img {
+      width: 30px;
+      height: 30px;
+      border-radius: 8px;
+      object-fit: cover;
+    }
+
+    .brand-title {
+      font-size: 0.98rem;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+    }
+
+    .sync-sub {
+      font-size: 0.68rem;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--emerald);
+    }
+
+    .btn-sm {
+      background: var(--card);
       border: 1px solid var(--border);
-      background: #1e293b;
-      color: var(--text);
-      padding: 7px 12px;
+      color: var(--sub);
+      padding: 6px 10px;
       border-radius: 7px;
-      font-size: 0.82rem;
-      font-weight: 600;
-      transition: all 0.15s;
+      font-size: 0.74rem;
+      font-weight: 700;
+      cursor: pointer;
     }
-    button:hover { background: #29374d; }
-    button.primary { background: var(--accent); color: #052e16; border-color: var(--accent); }
-    button.primary:hover { filter: brightness(1.08); }
-    .tweak-drawer {
-      display: none;
-      border-top: 1px solid var(--border);
-      padding-top: 10px;
-      font-size: 0.8rem;
-      color: var(--muted);
-      gap: 8px;
-      flex-direction: column;
+
+    .tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      background: #0b0e14;
+      padding: 3px;
+      border-radius: 9px;
+      border: 1px solid var(--border);
     }
-    .tweak-drawer.open { display: flex; }
-    .parlay-bar {
-      position: fixed;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: #0f172a;
-      border-top: 1px solid var(--accent);
-      padding: 12px 24px;
-      z-index: 50;
-      box-shadow: 0 -8px 25px rgba(0, 0, 0, 0.5);
-    }
-    .parlay-inner {
-      max-width: 1400px;
-      margin: 0 auto;
+
+    .tab {
+      border: none;
+      background: transparent;
+      color: var(--sub);
+      padding: 7px 8px;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      cursor: pointer;
       display: flex;
-      flex-wrap: wrap;
       align-items: center;
-      justify-content: space-between;
-      gap: 12px;
+      justify-content: center;
+      gap: 5px;
     }
-    .slip-legs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-    .leg-chip {
-      background: var(--accent-dim);
-      border: 1px solid var(--accent);
+
+    .tab.active-nba { background: var(--orange); color: #fff; }
+    .tab.active-ncaa { background: var(--emerald); color: #03150a; }
+
+    .toolbar {
+      display: flex;
+      gap: 6px;
+      margin: 10px 0 8px;
+    }
+
+    .search-in {
+      flex: 1;
+      min-width: 0;
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      outline: none;
+    }
+
+    .filter-sel {
+      background: var(--card);
+      border: 1px solid var(--border);
       color: var(--text);
+      padding: 8px 8px;
+      border-radius: 8px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      max-width: 142px;
+    }
+
+    .chip-strip {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+      scrollbar-width: none;
+    }
+    .chip-strip::-webkit-scrollbar { display: none; }
+
+    .f-chip {
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--sub);
       padding: 4px 10px;
       border-radius: 999px;
-      font-size: 0.78rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .f-chip.active {
+      background: var(--emerald-dim);
+      border-color: var(--emerald);
+      color: var(--emerald);
+    }
+
+    .parlay-banner {
+      background: linear-gradient(90deg, rgba(16, 185, 129, 0.12), rgba(14, 19, 26, 0.95));
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 10px;
+      padding: 9px 12px;
+      margin-bottom: 10px;
       display: flex;
+      justify-content: space-between;
       align-items: center;
+      gap: 8px;
+    }
+
+    .parlay-banner-text {
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .parlay-banner-sub {
+      font-size: 0.68rem;
+      color: var(--emerald);
+      font-weight: 600;
+    }
+
+    .btn-quick-parlay {
+      background: var(--emerald);
+      color: #03150a;
+      border: none;
+      padding: 6px 10px;
+      border-radius: 7px;
+      font-size: 0.72rem;
+      font-weight: 800;
+      white-space: nowrap;
+      cursor: pointer;
+    }
+
+    .list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(335px, 1fr));
+      gap: 9px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 11px;
+      padding: 11px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .card.in-slip { border-color: var(--emerald); }
+
+    .c-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
       gap: 6px;
     }
-    .leg-chip span { cursor: pointer; color: var(--danger); font-weight: bold; }
-    .empty-state {
-      grid-column: 1 / -1;
-      text-align: center;
-      padding: 48px;
-      color: var(--muted);
-      background: var(--panel);
-      border-radius: 12px;
-      border: 1px dashed var(--border);
+
+    .c-name {
+      font-size: 0.92rem;
+      font-weight: 700;
+      color: #fff;
     }
+
+    .c-meta {
+      font-size: 0.7rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .sharp-tags {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      margin-top: 3px;
+    }
+
+    .s-tag {
+      background: var(--orange-dim);
+      color: var(--orange);
+      border: 1px solid rgba(249, 115, 22, 0.3);
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.63rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .s-tag.cyan {
+      background: var(--cyan-dim);
+      color: var(--cyan);
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+
+    .edge-tag {
+      background: var(--emerald-dim);
+      color: var(--emerald);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      padding: 2px 6px;
+      border-radius: 5px;
+      font-size: 0.66rem;
+      font-weight: 800;
+      white-space: nowrap;
+    }
+
+    .streak-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #090c11;
+      border: 1px solid var(--border);
+      padding: 5px 8px;
+      border-radius: 7px;
+      font-size: 0.68rem;
+      color: var(--sub);
+    }
+
+    .dots-wrap {
+      display: flex;
+      gap: 3px;
+      align-items: center;
+    }
+
+    .g-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #232d3d;
+    }
+
+    .g-dot.hit {
+      background: var(--emerald);
+      box-shadow: 0 0 5px rgba(16, 185, 129, 0.5);
+    }
+
+    .prop-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+
+    .ncaa-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 5px;
+    }
+
+    .p-btn {
+      background: #131922;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 7px 8px;
+      border-radius: 7px;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.72rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      gap: 4px;
+    }
+
+    .p-btn .sim-hint {
+      display: block;
+      font-size: 0.62rem;
+      color: var(--muted);
+      font-weight: 500;
+    }
+
+    .p-btn .prob-val {
+      font-weight: 800;
+      color: var(--sub);
+      text-align: right;
+    }
+
+    .p-btn .hit-mini {
+      display: block;
+      font-size: 0.6rem;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .p-btn.hot .prob-val { color: var(--emerald); }
+
+    .p-btn.selected {
+      background: var(--emerald-dim);
+      border-color: var(--emerald);
+    }
+
+    .p-btn.selected .prob-val { color: var(--emerald); }
+
+    .ncaa-scores {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #0a0e14;
+      padding: 6px 9px;
+      border-radius: 7px;
+      font-size: 0.75rem;
+      font-variant-numeric: tabular-nums;
+      gap: 6px;
+    }
+
+    .load-more-btn {
+      width: 100%;
+      margin-top: 12px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 11px;
+      border-radius: 9px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .slip-bar {
+      position: fixed;
+      bottom: 10px;
+      left: 10px;
+      right: 10px;
+      max-width: 1096px;
+      margin: 0 auto;
+      background: rgba(13, 18, 26, 0.97);
+      border: 1px solid var(--emerald);
+      border-radius: 12px;
+      padding: 10px 12px;
+      z-index: 50;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(12px);
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    body.has-slip .slip-bar { display: flex; }
+
+    .slip-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .slip-chips {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      scrollbar-width: none;
+    }
+    .slip-chips::-webkit-scrollbar { display: none; }
+
+    .s-chip {
+      background: #18212e;
+      border: 1px solid var(--border);
+      color: #fff;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .s-chip span { color: var(--danger); font-weight: 900; cursor: pointer; }
   </style>
 </head>
 <body>
 
-<header>
-  <div class="header-inner">
-    <div class="brand">
-      <h1>🏀 NCAA D1 Full-Slate Monte Carlo Simulator <span class="badge-live" id="statusBadge">LIVE AUTO-SYNC</span></h1>
-      <div class="sub" id="slateSubtitle">Loading daily_slate.json...</div>
+<div class="wrap">
+  <header>
+    <div class="top-row">
+      <div class="brand">
+        <img src="./icon-512.png.jpeg" alt="SimLab" onerror="this.style.display='none'" />
+        <div>
+          <div class="brand-title">SimLab Command Center</div>
+          <div class="sync-sub"><span class="dot"></span><span id="syncText">Syncing live slates...</span></div>
+        </div>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <button id="installBtn" class="btn-sm" style="display:none; border-color:var(--emerald); color:var(--emerald);">📲 Install</button>
+        <button class="btn-sm" onclick="loadAllData(true)">↻ Sync</button>
+      </div>
     </div>
-    <div style="display:flex; gap:8px;">
-      <button onclick="rerunAll()">↻ Re-Simulate Slate</button>
-    </div>
-  </div>
-</header>
 
-<section class="controls-bar">
-  <div class="control-box">
-    <label><span>Search Team / Venue</span></label>
-    <input type="text" id="searchInput" placeholder="e.g. Duke, Marist, Pitt..." oninput="renderCards()" />
-  </div>
-  <div class="control-box">
-    <label><span>Filter Slate</span></label>
-    <select id="filterSelect" onchange="renderCards()">
-      <option value="all">All Games on Slate</option>
-      <option value="slip">My Parlay Slip Only</option>
-      <option value="high">High Confidence Edges (≥ 65%)</option>
-      <option value="close">Coin-Flip Matchups (&lt; 57%)</option>
+    <div class="tabs">
+      <button class="tab active-nba" id="tabNba" onclick="switchSport('nba')">🔥 NBA Props (<span id="nbaCount">0</span>)</button>
+      <button class="tab" id="tabNcaa" onclick="switchSport('ncaa')">🏀 NCAA Slate (<span id="ncaaCount">0</span>)</button>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <input type="text" id="searchInput" class="search-in" placeholder="Search player or team..." oninput="resetAndRender()" />
+    <select id="filterSelect" class="filter-sel" onchange="resetAndRender()">
+      <option value="all">All Matchups</option>
+      <option value="edge">Top Edges Only</option>
+      <option value="slip">In My Slip</option>
     </select>
   </div>
-  <div class="control-box">
-    <label><span>Home Court Advantage</span><span id="hcaVal">+3.2 pts</span></label>
-    <input type="range" id="hcaSlider" min="0" max="6" step="0.2" value="3.2" oninput="updateGlobalParams()" />
-  </div>
-  <div class="control-box">
-    <label><span>Game Variance (σ)</span><span id="varVal">10.5</span></label>
-    <input type="range" id="varSlider" min="7" max="14" step="0.5" value="10.5" oninput="updateGlobalParams()" />
-  </div>
-</section>
 
-<main class="grid" id="cardsGrid"></main>
+  <div class="chip-strip" id="nbaChips">
+    <button class="f-chip active" onclick="setSubFilter('ALL', this)">ALL PLAYERS</button>
+    <button class="f-chip" onclick="setSubFilter('HOT', this)">🔥 8/10 STREAKS</button>
+    <button class="f-chip" onclick="setSubFilter('USG', this)">⚡ USAGE BUMPS</button>
+    <button class="f-chip" onclick="setSubFilter('PTS', this)">POINTS</button>
+    <button class="f-chip" onclick="setSubFilter('REB', this)">REBOUNDS</button>
+    <button class="f-chip" onclick="setSubFilter('AST', this)">ASSISTS</button>
+    <button class="f-chip" onclick="setSubFilter('PRA', this)">PRA</button>
+  </div>
 
-<div class="parlay-bar">
-  <div class="parlay-inner">
-    <div class="slip-legs" id="slipLegs">
-      <strong style="font-size:0.85rem; color:var(--accent);">🎯 Parlay Slip:</strong>
-      <span style="font-size:0.82rem; color:var(--muted);">Click "+ Pick Away" or "+ Pick Home" on any game card</span>
+  <div class="parlay-banner" id="heroParlay" style="display:none;">
+    <div>
+      <div class="parlay-banner-text">🎯 AI Top 4-Leg Edge Parlay</div>
+      <div class="parlay-banner-sub" id="heroParlaySub">Calculating optimal edges...</div>
     </div>
-    <div style="display:flex; align-items:center; gap:16px;">
-      <div style="text-align:right;">
-        <div style="font-size:0.75rem; color:var(--muted);">Combined Simulated Hit Rate</div>
-        <div style="font-size:1.05rem; font-weight:700; color:var(--accent);" id="parlayStats">0.0% (N/A)</div>
-      </div>
-      <button onclick="clearSlip()">Clear</button>
+    <button class="btn-quick-parlay" onclick="loadTopParlay()">+ Load 4 Legs</button>
+  </div>
+
+  <main class="list" id="cardsList"></main>
+  <button class="load-more-btn" id="loadMoreBtn" style="display:none;" onclick="showMore()">Show More Results</button>
+</div>
+
+<div class="slip-bar" id="slipBar">
+  <div class="slip-top">
+    <div style="font-size:0.75rem; font-weight:800; color:var(--emerald);">
+      🎯 SLIP (<span id="slipCount">0</span>) • <span id="slipOdds" style="color:#fff;">0.0%</span> • <span id="slipPayout" style="color:var(--cyan);">$25 → $0</span>
+    </div>
+    <div style="display:flex; gap:5px;">
+      <button id="copySlipBtn" class="btn-sm" style="padding:3px 8px; font-size:0.7rem; border-color:var(--emerald); color:var(--emerald);" onclick="copySlipText()">📋 Copy</button>
+      <button class="btn-sm" style="padding:3px 8px; font-size:0.7rem;" onclick="clearSlip()">Clear</button>
     </div>
   </div>
+  <div class="slip-chips" id="slipChips"></div>
 </div>
 
 <script>
-  let rawGames = [];
-  let simCache = {};
-  let slip = []; // { id, team, side, prob }
+  const GITHUB_USER = "RockoDevXda";
+  const NCAA_JSON_URL = `https://raw.githubusercontent.com/${GITHUB_USER}/ncaa-sim/main/daily_slate.json`;
+  const NBA_JSON_URL = `https://raw.githubusercontent.com/${GITHUB_USER}/nba-props-sim/main/nba_props_slate.json`;
 
-  function gaussianRandom(mean = 0, stdev = 1) {
-    const u = 1 - Math.random();
-    const v = Math.random();
-    const z = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-    return z * stdev + mean;
+  let activeSport = "nba";
+  let subFilter = "ALL";
+  let visibleLimit = 25;
+  let ncaaGames = [];
+  let nbaPlayers = [];
+  let topParlayLegs = [];
+  let slip = [];
+  let deferredPrompt = null;
+
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("./sw.js").catch(() => {});
   }
+
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredPrompt = e;
+    document.getElementById("installBtn").style.display = "inline-block";
+  });
+
+  document.getElementById("installBtn").addEventListener("click", async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    document.getElementById("installBtn").style.display = "none";
+  });
 
   function probToAmerican(pct) {
     const p = pct / 100;
@@ -294,264 +570,320 @@
     return p >= 0.5 ? `${Math.round(-100 * p / (1 - p))}` : `+${Math.round(100 * (1 - p) / p)}`;
   }
 
-  function simulateGame(g, runs = 4000) {
-    const baseHca = parseFloat(document.getElementById("hcaSlider").value);
-    const sigma = parseFloat(document.getElementById("varSlider").value);
-    const hca = g.neutral ? 0.0 : baseHca;
-
-    const awayAdjO = g.away_adj_o ?? 105.0;
-    const awayAdjD = g.away_adj_d ?? 105.0;
-    const homeAdjO = g.home_adj_o ?? 105.0;
-    const homeAdjD = g.home_adj_d ?? 105.0;
-    const tempo = g.tempo ?? 68.0;
-
-    const awayEff = 105.0 + (awayAdjO - 105.0) + (homeAdjD - 105.0) + (g.away_boost || 0);
-    const homeEff = 105.0 + (homeAdjO - 105.0) + (awayAdjD - 105.0) + hca + (g.home_boost || 0);
-
-    let awayWins = 0, aSum = 0, hSum = 0;
-    const margins = []; // home - away
-
-    for (let i = 0; i < runs; i++) {
-      const poss = gaussianRandom(tempo, 2.8);
-      const aPts = (gaussianRandom(awayEff, sigma) / 100) * poss;
-      const hPts = (gaussianRandom(homeEff, sigma) / 100) * poss;
-      aSum += aPts;
-      hSum += hPts;
-      if (aPts > hPts) awayWins++;
-      margins.push(hPts - aPts);
-    }
-
-    const awayProb = +(awayWins / runs * 100).toFixed(1);
-    const homeProb = +(100 - awayProb).toFixed(1);
-    const projMargin = +((hSum - aSum) / runs).toFixed(1);
-
-    simCache[g.id] = {
-      awayProj: +(aSum / runs).toFixed(1),
-      homeProj: +(hSum / runs).toFixed(1),
-      awayProb,
-      homeProb,
-      projMargin,
-      margins
-    };
+  function switchSport(sport) {
+    activeSport = sport;
+    visibleLimit = 25;
+    document.getElementById("tabNba").className = sport === "nba" ? "tab active-nba" : "tab";
+    document.getElementById("tabNcaa").className = sport === "ncaa" ? "tab active-ncaa" : "tab";
+    document.getElementById("nbaChips").style.display = sport === "nba" ? "flex" : "none";
+    render();
   }
 
-  function drawHistogram(canvasId, margins) {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const w = canvas.width = canvas.offsetWidth * 2;
-    const h = canvas.height = 152;
-    ctx.clearRect(0, 0, w, h);
-
-    // Bins from -30 (Away +30) to +30 (Home +30)
-    const minM = -30, maxM = 30, binCount = 30;
-    const binSize = (maxM - minM) / binCount;
-    const bins = new Array(binCount).fill(0);
-
-    for (const m of margins) {
-      const idx = Math.max(0, Math.min(binCount - 1, Math.floor((m - minM) / binSize)));
-      bins[idx]++;
-    }
-    const maxCount = Math.max(...bins, 1);
-
-    bins.forEach((count, i) => {
-      const x = (i / binCount) * w;
-      const bw = (w / binCount) - 3;
-      const bh = (count / maxCount) * (h - 24);
-      const binCenter = minM + (i + 0.5) * binSize;
-      ctx.fillStyle = binCenter >= 0 ? "#10b981" : "#3b82f6";
-      ctx.fillRect(x + 1.5, h - bh - 14, bw, bh);
-    });
-
-    // Center 0-line
-    ctx.strokeStyle = "#94a3b8";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(w / 2, 4);
-    ctx.lineTo(w / 2, h - 12);
-    ctx.stroke();
-
-    ctx.fillStyle = "#94a3b8";
-    ctx.font = "18px sans-serif";
-    ctx.fillText("◀ Away Win", 12, 22);
-    ctx.fillText("Home Win ▶", w - 115, 22);
+  function setSubFilter(val, btn) {
+    subFilter = val;
+    visibleLimit = 25;
+    document.querySelectorAll(".f-chip").forEach(c => c.classList.remove("active"));
+    btn.classList.add("active");
+    render();
   }
 
-  function togglePick(gameId, side) {
-    const g = rawGames.find(x => x.id === gameId);
-    const sim = simCache[gameId];
-    if (!g || !sim) return;
+  function resetAndRender() {
+    visibleLimit = 25;
+    render();
+  }
 
-    const team = side === "away" ? g.away_short : g.home_short;
-    const prob = side === "away" ? sim.awayProb : sim.homeProb;
+  function showMore() {
+    visibleLimit += 25;
+    render();
+  }
 
-    const existingIdx = slip.findIndex(s => s.id === gameId && s.side === side);
-    if (existingIdx !== -1) {
-      slip.splice(existingIdx, 1);
+  function toggleSlip(key, label, prob) {
+    const idx = slip.findIndex(s => s.key === key);
+    if (idx !== -1) {
+      slip.splice(idx, 1);
     } else {
-      slip = slip.filter(s => s.id !== gameId);
-      slip.push({ id: gameId, team, side, prob });
+      slip.push({ key, label, prob });
     }
-    updateSlipBar();
-    renderCards();
+    updateSlipUI();
+    render();
   }
 
   function clearSlip() {
     slip = [];
-    updateSlipBar();
-    renderCards();
+    updateSlipUI();
+    render();
   }
 
-  function updateSlipBar() {
-    const container = document.getElementById("slipLegs");
-    const statsEl = document.getElementById("parlayStats");
+  function loadTopParlay() {
+    if (!topParlayLegs.length) return;
+    slip = topParlayLegs.map(x => ({ ...x }));
+    updateSlipUI();
+    render();
+  }
 
-    if (slip.length === 0) {
-      container.innerHTML = `<strong style="font-size:0.85rem; color:var(--accent);">🎯 Parlay Slip:</strong>
-        <span style="font-size:0.82rem; color:var(--muted);">Click "+ Away" or "+ Home" on any game card</span>`;
-      statsEl.textContent = "0.0% (N/A)";
+  function copySlipText() {
+    if (!slip.length) return;
+    let comb = 1.0;
+    slip.forEach(s => { comb *= (s.prob / 100); });
+    const pct = +(comb * 100).toFixed(1);
+    const lines = [
+      `🎯 SimLab ${slip.length}-Leg Parlay (${pct}% | Fair ${probToAmerican(pct)}):`,
+      ...slip.map((s, i) => `${i + 1}. ${s.label} (${s.prob}%)`)
+    ].join("\n");
+    navigator.clipboard.writeText(lines).then(() => {
+      const btn = document.getElementById("copySlipBtn");
+      btn.textContent = "✓ Copied";
+      setTimeout(() => { btn.textContent = "📋 Copy"; }, 1800);
+    });
+  }
+
+  function updateSlipUI() {
+    const has = slip.length > 0;
+    document.body.classList.toggle("has-slip", has);
+    if (!has) return;
+
+    let comb = 1.0;
+    slip.forEach(s => { comb *= (s.prob / 100); });
+    const pct = +(comb * 100).toFixed(1);
+    const estPayout = Math.round(25 * Math.pow(1.909, slip.length));
+
+    document.getElementById("slipCount").textContent = slip.length;
+    document.getElementById("slipOdds").textContent = `${pct}% (${probToAmerican(pct)})`;
+    document.getElementById("slipPayout").textContent = `$25 → $${estPayout}`;
+    document.getElementById("slipChips").innerHTML = slip.map(s => `
+      <div class="s-chip">${s.label} (${s.prob}%) <span onclick="toggleSlip('${s.key}')">×</span></div>
+    `).join("");
+  }
+
+  function buildTopParlay() {
+    const legs = [];
+    const usedGames = new Set();
+
+    const sortedNba = [...nbaPlayers].sort((a, b) => (b.best_prop?.prob || 0) - (a.best_prop?.prob || 0));
+    for (const p of sortedNba) {
+      if (legs.length >= 2) break;
+      const gKey = p.game_id || `${p.team}-${p.opponent}`;
+      if (!usedGames.has(gKey) && p.best_prop) {
+        legs.push({
+          key: `nba-${p.id}-${p.best_prop.stat}`,
+          label: `${p.player} ${p.best_prop.market}`,
+          prob: p.best_prop.prob
+        });
+        usedGames.add(gKey);
+      }
+    }
+
+    const sortedNcaa = [...ncaaGames]
+      .filter(g => g.has_line && g.verified_d1 !== false && Math.abs(g.home_spread || 0) <= 24.5)
+      .sort((a, b) => (b.spread_cover_pct || 0) - (a.spread_cover_pct || 0));
+
+    for (const g of sortedNcaa) {
+      if (legs.length >= 3) break;
+      legs.push({
+        key: `ncaa-${g.id}-ats`,
+        label: g.spread_pick,
+        prob: g.spread_cover_pct
+      });
+    }
+
+    const topTotalGame = [...ncaaGames]
+      .filter(g => g.has_total && g.verified_d1 !== false && (g.total_edge_pts || 0) <= 14.0)
+      .sort((a, b) => (b.total_cover_pct || 0) - (a.total_cover_pct || 0))[0];
+
+    if (topTotalGame && legs.length < 4) {
+      legs.push({
+        key: `ncaa-${topTotalGame.id}-tot`,
+        label: `${topTotalGame.away_short}/${topTotalGame.home_short} ${topTotalGame.total_pick}`,
+        prob: topTotalGame.total_cover_pct
+      });
+    }
+
+    topParlayLegs = legs;
+    const banner = document.getElementById("heroParlay");
+    if (legs.length < 2) {
+      banner.style.display = "none";
       return;
     }
 
-    let combined = 1.0;
-    slip.forEach(s => {
-      const latest = simCache[s.id];
-      if (latest) s.prob = s.side === "away" ? latest.awayProb : latest.homeProb;
-      combined *= (s.prob / 100);
-    });
-
-    const pct = +(combined * 100).toFixed(1);
-    statsEl.textContent = `${pct}% (${probToAmerican(pct)})`;
-
-    container.innerHTML = `<strong style="font-size:0.85rem; color:var(--accent);">🎯 Slip (${slip.length}):</strong>` +
-      slip.map(s => `<div class="leg-chip">${s.team} ML (${s.prob}%) <span onclick="togglePick('${s.id}','${s.side}')">×</span></div>`).join("");
+    let c = 1.0;
+    legs.forEach(l => { c *= (l.prob / 100); });
+    const pct = +(c * 100).toFixed(1);
+    banner.style.display = "flex";
+    document.getElementById("heroParlaySub").textContent =
+      `${legs.map(l => l.label).join(" • ")} (${pct}% | ${probToAmerican(pct)})`;
   }
 
-  function adjustBoost(gameId, side, val) {
-    const g = rawGames.find(x => x.id === gameId);
-    if (!g) return;
-    if (side === "away") g.away_boost = parseFloat(val);
-    if (side === "home") g.home_boost = parseFloat(val);
-    simulateGame(g);
-    updateSlipBar();
-    renderCards();
+  function renderDots(dotsStr) {
+    if (!dotsStr) return "";
+    return `<div class="dots-wrap">${dotsStr.split("").map(d => `<span class="g-dot ${d === '1' ? 'hit' : ''}"></span>`).join("")}</div>`;
   }
 
-  function renderCards() {
-    const grid = document.getElementById("cardsGrid");
+  function render() {
+    const listEl = document.getElementById("cardsList");
+    const moreBtn = document.getElementById("loadMoreBtn");
     const q = document.getElementById("searchInput").value.toLowerCase().trim();
     const filter = document.getElementById("filterSelect").value;
 
-    const filtered = rawGames.filter(g => {
-      const sim = simCache[g.id];
-      const maxProb = Math.max(sim.awayProb, sim.homeProb);
-      const matchesText = !q ||
-        g.away_team.toLowerCase().includes(q) ||
-        g.home_team.toLowerCase().includes(q) ||
-        (g.venue || "").toLowerCase().includes(q);
-      if (!matchesText) return false;
+    if (activeSport === "nba") {
+      const sorted = [...nbaPlayers].sort((a, b) => {
+        if (["PTS", "REB", "AST", "PRA"].includes(subFilter)) {
+          const pa = a.all_props?.find(x => x.stat === subFilter)?.prob || 0;
+          const pb = b.all_props?.find(x => x.stat === subFilter)?.prob || 0;
+          return pb - pa;
+        }
+        return (b.best_prop?.prob || 0) - (a.best_prop?.prob || 0);
+      });
 
-      if (filter === "slip") return slip.some(s => s.id === g.id);
-      if (filter === "high") return maxProb >= 65.0;
-      if (filter === "close") return maxProb < 57.0;
-      return true;
-    });
+      const filtered = sorted.filter(p => {
+        const matchQ = !q || p.player.toLowerCase().includes(q) || p.team.toLowerCase().includes(q) || p.opponent.toLowerCase().includes(q);
+        if (!matchQ) return false;
+        if (subFilter === "USG" && (p.usage_bump_pct || 0) <= 0) return false;
+        if (subFilter === "HOT" && (p.best_prop?.hits || 0) < 8) return false;
+        if (filter === "edge" && (p.best_prop?.prob || 0) < 58 && (p.usage_bump_pct || 0) <= 0) return false;
+        if (filter === "slip" && !slip.some(s => s.key.startsWith(`nba-${p.id}`))) return false;
+        return true;
+      });
 
-    if (filtered.length === 0) {
-      grid.innerHTML = `<div class="empty-state">No matchups match your current search or filter.</div>`;
-      return;
+      const slice = filtered.slice(0, visibleLimit);
+      moreBtn.style.display = filtered.length > visibleLimit ? "block" : "none";
+      moreBtn.textContent = `Show More (${filtered.length - visibleLimit} remaining)`;
+
+      listEl.innerHTML = slice.map(p => {
+        const inSlip = slip.some(s => s.key.startsWith(`nba-${p.id}`));
+        const bp = p.best_prop || {};
+        const propsToShow = ["PTS", "REB", "AST", "PRA"].includes(subFilter)
+          ? (p.all_props || []).filter(m => m.stat === subFilter)
+          : (p.all_props || []);
+
+        const tagsHtml = (p.tags || []).map(t =>
+          `<span class="s-tag ${t.includes('DEF') || t.includes('B2B') ? 'cyan' : ''}">${t}</span>`
+        ).join("");
+
+        return `
+          <article class="card ${inSlip ? 'in-slip' : ''}">
+            <div class="c-head">
+              <div>
+                <div class="c-name">${p.player} <span class="c-meta">• ${p.team} vs ${p.opponent} (${p.avg_min}m)</span></div>
+                ${tagsHtml ? `<div class="sharp-tags">${tagsHtml}</div>` : ''}
+              </div>
+              <span class="c-meta">O/U ${p.game_total}</span>
+            </div>
+
+            ${bp.dots ? `
+              <div class="streak-bar">
+                <span><strong>${bp.market}</strong> Recent Form: <strong style="color:var(--emerald);">${bp.hit_str}</strong></span>
+                ${renderDots(bp.dots)}
+              </div>
+            ` : ''}
+
+            <div class="prop-grid" style="${propsToShow.length === 1 ? 'grid-template-columns:1fr;' : ''}">
+              ${propsToShow.map(m => {
+                const k = `nba-${p.id}-${m.stat}`;
+                const sel = slip.some(s => s.key === k);
+                const hot = m.prob >= 60;
+                return `
+                  <button class="p-btn ${sel ? 'selected' : ''} ${hot ? 'hot' : ''}" onclick="toggleSlip('${k}','${p.player} ${m.market}',${m.prob})">
+                    <div>
+                      <span>${m.market}</span>
+                      <span class="sim-hint">Sim: ${m.proj}</span>
+                    </div>
+                    <div class="prob-val">
+                      <span>${m.prob}%</span>
+                      ${m.hit_str ? `<span class="hit-mini">${m.hit_str}</span>` : ''}
+                    </div>
+                  </button>
+                `;
+              }).join("")}
+            </div>
+          </article>
+        `;
+      }).join("");
+    } else {
+      const sorted = [...ncaaGames].sort((a, b) =>
+        Math.max(b.spread_cover_pct || 0, b.total_cover_pct || 0) - Math.max(a.spread_cover_pct || 0, a.total_cover_pct || 0)
+      );
+      const filtered = sorted.filter(g => {
+        const matchQ = !q || g.away_team.toLowerCase().includes(q) || g.home_team.toLowerCase().includes(q);
+        if (!matchQ) return false;
+        if (filter === "edge" && (g.spread_cover_pct || 0) < 57 && (g.total_cover_pct || 0) < 57) return false;
+        if (filter === "slip" && !slip.some(s => s.key.startsWith(`ncaa-${g.id}`))) return false;
+        return true;
+      });
+
+      const slice = filtered.slice(0, visibleLimit);
+      moreBtn.style.display = filtered.length > visibleLimit ? "block" : "none";
+      moreBtn.textContent = `Show More (${filtered.length - visibleLimit} remaining)`;
+
+      listEl.innerHTML = slice.map(g => {
+        const atsKey = `ncaa-${g.id}-ats`;
+        const totKey = `ncaa-${g.id}-tot`;
+        const mlKey = `ncaa-${g.id}-ml`;
+        const atsSel = slip.some(s => s.key === atsKey);
+        const totSel = slip.some(s => s.key === totKey);
+        const mlSel = slip.some(s => s.key === mlKey);
+        const simTotal = g.total_proj || +(g.away_proj + g.home_proj).toFixed(1);
+
+        return `
+          <article class="card ${(atsSel || totSel || mlSel) ? 'in-slip' : ''}">
+            <div class="c-head">
+              <div>
+                <div class="c-name">${g.away_short} @ ${g.home_short}</div>
+                <div class="c-meta">${g.tipoff || ''} • ${g.market_line || 'PK'}${g.has_total ? ` • O/U ${g.over_under}` : ''}</div>
+              </div>
+              ${g.has_line ? `<span class="edge-tag">+${g.edge_pts} ATS</span>` : ''}
+            </div>
+            <div class="ncaa-scores">
+              <span><strong>${g.away_short}</strong> ${g.away_proj} • <strong>${g.home_short}</strong> ${g.home_proj}</span>
+              <span style="color:var(--cyan); font-weight:700;">Tot: ${simTotal}</span>
+            </div>
+            <div class="ncaa-grid">
+              ${g.has_line
+                ? `<button class="p-btn ${atsSel ? 'selected' : ''} ${g.spread_cover_pct >= 58 ? 'hot' : ''}" onclick="toggleSlip('${atsKey}','${g.spread_pick}',${g.spread_cover_pct})">
+                    <span>${g.spread_pick}</span>
+                    <span class="prob-val">${g.spread_cover_pct}%</span>
+                   </button>`
+                : `<button class="p-btn" disabled><span>No Line</span></button>`}
+              ${g.has_total
+                ? `<button class="p-btn ${totSel ? 'selected' : ''} ${g.total_cover_pct >= 58 ? 'hot' : ''}" onclick="toggleSlip('${totKey}','${g.away_short}/${g.home_short} ${g.total_pick}',${g.total_cover_pct})">
+                    <span>${g.total_pick}</span>
+                    <span class="prob-val">${g.total_cover_pct}%</span>
+                   </button>`
+                : `<button class="p-btn" disabled><span>No O/U</span></button>`}
+              <button class="p-btn ${mlSel ? 'selected' : ''} ${g.favored_prob >= 70 ? 'hot' : ''}" onclick="toggleSlip('${mlKey}','${g.favored_team} ML',${g.favored_prob})">
+                <span>${g.favored_team} ML</span>
+                <span class="prob-val">${g.favored_prob}%</span>
+              </button>
+            </div>
+          </article>
+        `;
+      }).join("");
     }
-
-    grid.innerHTML = filtered.map(g => {
-      const sim = simCache[g.id];
-      const awayFav = sim.awayProb >= sim.homeProb;
-      const inSlip = slip.find(s => s.id === g.id);
-      const simLine = sim.projMargin > 0
-        ? `${g.home_short} -${sim.projMargin}`
-        : `${g.away_short} -${Math.abs(sim.projMargin)}`;
-
-      return `
-        <article class="card ${inSlip ? 'in-slip' : ''}">
-          <div class="card-top">
-            <span>${g.tipoff || ''} • ${g.venue || ''} ${g.neutral ? '(Neutral)' : ''}</span>
-            <span class="line-pill">Book: ${g.market_line || 'PK'} | Sim: ${simLine}</span>
-          </div>
-          <div class="teams">
-            <div class="team-row">
-              <div>
-                <div class="team-name">${g.away_team} <span class="team-meta">(${g.away_record || ''})</span></div>
-                <div class="team-meta">AdjO: ${g.away_adj_o ?? 105} • AdjD: ${g.away_adj_d ?? 105}</div>
-              </div>
-              <div class="team-nums">
-                <div class="proj-score ${awayFav ? 'fav' : ''}">${sim.awayProj}</div>
-                <div class="win-pct ${awayFav ? 'fav' : 'dog'}">${sim.awayProb}% (${probToAmerican(sim.awayProb)})</div>
-              </div>
-            </div>
-            <div class="team-row">
-              <div>
-                <div class="team-name">${g.home_team} <span class="team-meta">(${g.home_record || ''})</span></div>
-                <div class="team-meta">AdjO: ${g.home_adj_o ?? 105} • AdjD: ${g.home_adj_d ?? 105}</div>
-              </div>
-              <div class="team-nums">
-                <div class="proj-score ${!awayFav ? 'fav' : ''}">${sim.homeProj}</div>
-                <div class="win-pct ${!awayFav ? 'fav' : 'dog'}">${sim.homeProb}% (${probToAmerican(sim.homeProb)})</div>
-              </div>
-            </div>
-          </div>
-          <canvas class="hist" id="hist-${g.id}"></canvas>
-          <div class="card-actions">
-            <div style="display:flex; gap:6px;">
-              <button class="${inSlip?.side === 'away' ? 'primary' : ''}" onclick="togglePick('${g.id}','away')">+ ${g.away_short}</button>
-              <button class="${inSlip?.side === 'home' ? 'primary' : ''}" onclick="togglePick('${g.id}','home')">+ ${g.home_short}</button>
-            </div>
-            <button onclick="document.getElementById('tweak-${g.id}').classList.toggle('open')">⚙ What-If</button>
-          </div>
-          <div class="tweak-drawer" id="tweak-${g.id}">
-            <label>${g.away_short} Efficiency Adj (${g.away_boost || 0} pts):
-              <input type="range" min="-8" max="8" step="0.5" value="${g.away_boost || 0}" onchange="adjustBoost('${g.id}','away',this.value)" />
-            </label>
-            <label>${g.home_short} Efficiency Adj (${g.home_boost || 0} pts):
-              <input type="range" min="-8" max="8" step="0.5" value="${g.home_boost || 0}" onchange="adjustBoost('${g.id}','home',this.value)" />
-            </label>
-          </div>
-        </article>
-      `;
-    }).join("");
-
-    requestAnimationFrame(() => {
-      filtered.forEach(g => drawHistogram(`hist-${g.id}`, simCache[g.id].margins));
-    });
   }
 
-  function updateGlobalParams() {
-    document.getElementById("hcaVal").textContent = `+${parseFloat(document.getElementById("hcaSlider").value).toFixed(1)} pts`;
-    document.getElementById("varVal").textContent = parseFloat(document.getElementById("varSlider").value).toFixed(1);
-    rerunAll();
-  }
-
-  function rerunAll() {
-    rawGames.forEach(g => simulateGame(g));
-    updateSlipBar();
-    renderCards();
-  }
-
-  async function init() {
+  async function loadAllData(force = false) {
+    const bust = force ? `?t=${Date.now()}` : `?t=${Math.floor(Date.now() / 60000)}`;
+    document.getElementById("syncText").textContent = "Syncing...";
     try {
-      const resp = await fetch(`./daily_slate.json?t=${Date.now()}`);
-      if (!resp.ok) throw new Error("No daily_slate.json yet");
-      rawGames = await resp.json();
-      const updated = rawGames[0]?.generated_at || "Today";
-      document.getElementById("slateSubtitle").textContent =
-        `${rawGames.length} NCAA D1 Games Loaded • Auto-Updated: ${updated}`;
-      rerunAll();
-    } catch (err) {
-      document.getElementById("statusBadge").textContent = "WAITING FOR FIRST RUN";
-      document.getElementById("slateSubtitle").textContent =
-        "Run your GitHub Action once to generate daily_slate.json, then refresh this page.";
+      const [ncaaRes, nbaRes] = await Promise.allSettled([
+        fetch(NCAA_JSON_URL + bust),
+        fetch(NBA_JSON_URL + bust)
+      ]);
+      if (ncaaRes.status === "fulfilled" && ncaaRes.value.ok) ncaaGames = await ncaaRes.value.json();
+      if (nbaRes.status === "fulfilled" && nbaRes.value.ok) nbaPlayers = await nbaRes.value.json();
+
+      document.getElementById("ncaaCount").textContent = ncaaGames.length;
+      document.getElementById("nbaCount").textContent = nbaPlayers.length;
+      const ts = ncaaGames[0]?.generated_at || nbaPlayers[0]?.generated_at || "Live";
+      document.getElementById("syncText").textContent = `Synced • ${ts}`;
+
+      buildTopParlay();
+      render();
+    } catch (e) {
+      document.getElementById("syncText").textContent = "Offline cache";
     }
   }
 
-  init();
+  loadAllData();
 </script>
 </body>
 </html>
