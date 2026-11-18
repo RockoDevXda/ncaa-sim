@@ -1,14 +1,9 @@
 import os
-import re
-import io
 import json
 import time
 import random
-import difflib
 import requests
-import pandas as pd
-import xml.etree.ElementTree as ET
-from datetime import datetime
+from datetime import datetime, timezone
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL", "")
 DASHBOARD_URL = os.getenv("DASHBOARD_URL", "https://rockodevxda.github.io/sports-command-center/")
@@ -17,120 +12,7 @@ HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 }
 
-TEAM_ALIASES = {
-    "ul monroe": "louisiana monroe",
-    "ulm": "louisiana monroe",
-    "ul lafayette": "louisiana",
-    "uconn": "connecticut",
-    "umass": "massachusetts",
-    "unc": "north carolina",
-    "unlv": "unlv",
-    "usc": "usc",
-    "smu": "smu",
-    "tcu": "tcu",
-    "vcu": "vcu",
-    "ucf": "ucf",
-    "utep": "utep",
-    "utsa": "utsa",
-    "lsu": "lsu",
-    "ole miss": "mississippi",
-    "miss state": "mississippi st",
-    "mississippi state": "mississippi st",
-    "pitt": "pittsburgh",
-    "miami": "miami fl",
-    "nc state": "north carolina st",
-    "penn": "pennsylvania",
-    "cal": "california",
-    "siu edwardsville": "siue",
-    "app state": "appalachian st",
-    "sam houston": "sam houston st",
-    "ut martin": "tennessee martin",
-    "ut rio grande valley": "utrgv",
-    "uic": "illinois chicago",
-    "umkc": "kansas city",
-    "omaha": "nebraska omaha",
-}
-
 espn_stats_cache = {}
-
-
-def normalize_team(name: str) -> str:
-    s = name.lower().strip()
-    s = re.sub(r"\([^)]*\)", "", s)
-    s = re.sub(r"[^\w\s]", "", s)
-    s = re.sub(r"\bstate\b", "st", s)
-    s = re.sub(r"\s+", " ", s).strip()
-    return TEAM_ALIASES.get(s, s)
-
-
-def fetch_haslametrics_ratings():
-    """Fetches free tempo-free schedule-adjusted efficiency & pace from Haslametrics."""
-    season_yr = str(datetime.now().year + 1 if datetime.now().month >= 7 else datetime.now().year)[-2:]
-    xml_url = f"https://haslametrics.com/ratings{season_yr}.xml"
-    ratings = {}
-
-    try:
-        resp = requests.get(xml_url, headers=HEADERS, timeout=15)
-        if resp.status_code == 200 and "<" in resp.text:
-            root = ET.fromstring(resp.text)
-            for mr in root.findall(".//mr"):
-                team_raw = mr.attrib.get("t", "").strip()
-                if not team_raw:
-                    continue
-                norm = normalize_team(team_raw)
-                try:
-                    adj_o = float(mr.attrib.get("ou", 105.0))
-                    adj_d = float(mr.attrib.get("du", 105.0))
-                    tempo = float(mr.attrib.get("p", 68.0))
-                    ratings[norm] = {
-                        "adj_o": round(adj_o, 1),
-                        "adj_d": round(adj_d, 1),
-                        "tempo": round(tempo, 1),
-                        "source": "Haslametrics",
-                    }
-                except (ValueError, TypeError):
-                    continue
-            if len(ratings) > 100:
-                print(f"Successfully loaded {len(ratings)} teams from Haslametrics XML.")
-                return ratings
-    except Exception as e:
-        print(f"Haslametrics XML note ({e}); trying HTML table fallback.")
-
-    # HTML table fallback on Haslametrics main ratings page
-    try:
-        resp = requests.get("https://haslametrics.com/ratings.php", headers=HEADERS, timeout=15)
-        if resp.status_code == 200:
-            tables = pd.read_html(io.StringIO(resp.text))
-            for df in tables:
-                if len(df) < 100:
-                    continue
-                if isinstance(df.columns, pd.MultiIndex):
-                    df.columns = [str(col[-1]) for col in df.columns]
-                cols = [str(c) for c in df.columns]
-                team_col = next((c for c in cols if "Team" in c), None)
-                off_col = next((c for c in cols if c in ("Eff", "O_Eff", "Off")), None)
-                def_col = next((c for c in cols if c in ("Eff.1", "D_Eff", "Def")), None)
-                pace_col = next((c for c in cols if "Pace" in c or "Tempo" in c), None)
-                if team_col and off_col and def_col:
-                    for _, row in df.iterrows():
-                        t_raw = re.sub(r"\s+\(\d+-\d+\)$", "", str(row[team_col])).strip()
-                        norm = normalize_team(t_raw)
-                        try:
-                            ratings[norm] = {
-                                "adj_o": round(float(row[off_col]), 1),
-                                "adj_d": round(float(row[def_col]), 1),
-                                "tempo": round(float(row[pace_col]), 1) if pace_col else 68.0,
-                                "source": "Haslametrics",
-                            }
-                        except (ValueError, TypeError):
-                            continue
-                    if len(ratings) > 100:
-                        print(f"Successfully loaded {len(ratings)} teams from Haslametrics HTML.")
-                        return ratings
-    except Exception as e:
-        print(f"Haslametrics HTML note ({e}); using live ESPN team efficiency.")
-
-    return {}
 
 
 def fetch_todays_games():
@@ -150,9 +32,13 @@ def fetch_todays_games():
         home = next(c for c in competitors if c["homeAway"] == "home")
         away = next(c for c in competitors if c["homeAway"] == "away")
 
+        away_short = away["team"].get("shortDisplayName", away["team"]["displayName"])
+        home_short = home["team"].get("shortDisplayName", home["team"]["displayName"])
+
         odds_info = comp.get("odds", [{}])[0] if comp.get("odds") else {}
         spread_details = odds_info.get("details", "PK")
         home_spread = float(odds_info.get("spread", 0.0) or 0.0)
+        game_ou = float(odds_info.get("overUnder", 0.0) or 0.0)
         has_line = bool(odds_info.get("details"))
 
         tip_dt = datetime.fromisoformat(event["date"].replace("Z", "+00:00"))
@@ -165,22 +51,21 @@ def fetch_todays_games():
             "neutral": comp.get("neutralSite", False),
             "market_line": spread_details,
             "home_spread": home_spread,
+            "over_under": game_ou,
             "has_line": has_line,
             "away_id": away["team"]["id"],
             "away_team": away["team"]["displayName"],
-            "away_short": away["team"].get("shortDisplayName", away["team"]["displayName"]),
-            "away_location": away["team"].get("location", away["team"]["displayName"]),
+            "away_short": away_short,
             "away_record": away.get("records", [{}])[0].get("summary", "0-0"),
             "home_id": home["team"]["id"],
             "home_team": home["team"]["displayName"],
-            "home_short": home["team"].get("shortDisplayName", home["team"]["displayName"]),
-            "home_location": home["team"].get("location", home["team"]["displayName"]),
+            "home_short": home_short,
             "home_record": home.get("records", [{}])[0].get("summary", "0-0"),
         })
     return games
 
 
-def fetch_espn_fallback(team_id, record_str):
+def fetch_espn_team_efficiency(team_id, record_str):
     if team_id in espn_stats_cache:
         return espn_stats_cache[team_id]
 
@@ -209,44 +94,20 @@ def fetch_espn_fallback(team_id, record_str):
                 parts = record_str.split("-")
                 win_pct = int(parts[0]) / max(1, int(parts[0]) + int(parts[1])) if len(parts) == 2 else 0.5
                 adj_d = round(107.0 - (win_pct * 8.5), 1)
-                res = {"adj_o": adj_o, "adj_d": adj_d, "tempo": round(poss, 1), "source": "ESPN"}
+                res = {"adj_o": adj_o, "adj_d": adj_d, "tempo": round(poss, 1), "verified": True}
                 espn_stats_cache[team_id] = res
                 return res
     except Exception:
         pass
 
-    res = {"adj_o": 95.0, "adj_d": 112.0, "tempo": 67.5, "source": "Fallback"}
+    res = {"adj_o": 95.0, "adj_d": 112.0, "tempo": 67.5, "verified": False}
     espn_stats_cache[team_id] = res
     return res
 
 
-def get_team_efficiency(game, side, hasla_ratings):
-    if hasla_ratings:
-        candidates = [
-            game[f"{side}_location"],
-            game[f"{side}_short"],
-            game[f"{side}_team"],
-        ]
-        keys = list(hasla_ratings.keys())
-
-        for c in candidates:
-            norm = normalize_team(c)
-            if norm in hasla_ratings:
-                return hasla_ratings[norm], True
-
-        for c in candidates:
-            norm = normalize_team(c)
-            matches = difflib.get_close_matches(norm, keys, n=1, cutoff=0.84)
-            if matches:
-                return hasla_ratings[matches[0]], True
-
-    fb = fetch_espn_fallback(game[f"{side}_id"], game[f"{side}_record"])
-    return fb, (fb["source"] == "ESPN")
-
-
-def run_monte_carlo(game, hasla_ratings, n_sims=10000):
-    away_stats, away_ok = get_team_efficiency(game, "away", hasla_ratings)
-    home_stats, home_ok = get_team_efficiency(game, "home", hasla_ratings)
+def run_monte_carlo(game, n_sims=10000):
+    away_stats = fetch_espn_team_efficiency(game["away_id"], game["away_record"])
+    home_stats = fetch_espn_team_efficiency(game["home_id"], game["home_record"])
 
     hca = 0.0 if game["neutral"] else 3.3
     exp_tempo = (away_stats["tempo"] + home_stats["tempo"]) / 2.0
@@ -300,18 +161,12 @@ def run_monte_carlo(game, hasla_ratings, n_sims=10000):
         spread_pick = f"{game['away_short']} {away_spread:+g}" if away_spread != 0 else f"{game['away_short']} PK"
         spread_cover_pct = away_cover_pct
 
-    verified_d1 = away_ok and home_ok and abs(home_spread) <= 24.5 and edge_pts <= 13.0
-    rating_source = "Haslametrics" if (away_stats["source"] == "Haslametrics" and home_stats["source"] == "Haslametrics") else "ESPN"
+    verified_d1 = away_stats["verified"] and home_stats["verified"] and abs(home_spread) <= 24.5 and edge_pts <= 13.0
 
     return {
         **game,
-        "rating_source": rating_source,
+        "rating_source": "ESPN",
         "verified_d1": verified_d1,
-        "away_adj_o": away_stats["adj_o"],
-        "away_adj_d": away_stats["adj_d"],
-        "home_adj_o": home_stats["adj_o"],
-        "home_adj_d": home_stats["adj_d"],
-        "tempo": round(exp_tempo, 1),
         "away_proj": away_proj,
         "home_proj": home_proj,
         "away_win_pct": away_prob,
@@ -334,7 +189,7 @@ def prob_to_american_odds(prob_pct):
     return f"+{int(round(100 * (1 - p) / p))}"
 
 
-def send_discord_report(results, hasla_active):
+def send_discord_report(results):
     if not DISCORD_WEBHOOK_URL:
         return
 
@@ -391,18 +246,17 @@ def send_discord_report(results, hasla_active):
         for i, leg in enumerate(parlay_legs)
     ]
 
-    source_badge = "Haslametrics AdjO/AdjD/Pace" if hasla_active else "ESPN Efficiency"
     embed_parlay = {
-        "title": f"🎯 Top 4-Team Edge Parlay ({source_badge}) — {date_label}",
+        "title": f"🎯 Top 4-Team NCAA Edge Parlay — {date_label}",
         "url": DASHBOARD_URL,
         "description": (
             f"**Combined Hit Rate:** `{parlay_pct}%` (**Fair Odds: {prob_to_american_odds(parlay_pct)}**)\n"
-            f"10,000-run tempo-free simulation vs. Vegas lines. [Open Command Center]({DASHBOARD_URL})"
+            f"10,000-run simulation vs. live Vegas lines. [Open Command Center]({DASHBOARD_URL})"
         ),
         "color": 3066993,
         "fields": parlay_fields,
-        "footer": {"text": f"SimLab NCAA Engine • {source_badge}"},
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "footer": {"text": "SimLab NCAA Engine • ESPN Live Data"},
+        "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
 
     slate_lines = [
@@ -431,12 +285,11 @@ def send_discord_report(results, hasla_active):
 
 
 if __name__ == "__main__":
-    hasla_ratings = fetch_haslametrics_ratings()
     games = fetch_todays_games()
-    results = [run_monte_carlo(g, hasla_ratings, n_sims=10000) for g in games]
+    results = [run_monte_carlo(g, n_sims=10000) for g in games]
 
     with open("daily_slate.json", "w") as f:
         json.dump(results, f, indent=2)
 
-    send_discord_report(results, hasla_active=bool(hasla_ratings))
-    print(f"Completed {len(results)} simulations (Haslametrics active: {bool(hasla_ratings)}).")
+    send_discord_report(results)
+    print(f"Completed {len(results)} NCAA simulations via ESPN.")
